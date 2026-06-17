@@ -51,7 +51,12 @@ export interface FieldSpec {
   default?: string;
 }
 
-export type EncodingStrategy = 'fixed-width' | 'pipe-delimited' | 'coded-field';
+export type EncodingStrategy =
+  | 'fixed-width'
+  | 'pipe-delimited'
+  | 'coded-field'
+  | 'concatenated'; // fields emitted back-to-back, variable width, no tags/delimiters
+                     // (real-world CRIF Consumer "Data Submission Form" output)
 
 export type Cardinality =
   | 'header' // exactly one, file-level
@@ -84,7 +89,11 @@ export interface SegmentSpec {
   codedHeaderSuffix?: string;
 }
 
-export type FormatId = 'consumer-ucrf12' | 'commercial-ucrf' | 'mfi-cdf';
+export type FormatId =
+  | 'consumer-ucrf12'
+  | 'consumer-ucrf12-flat'
+  | 'commercial-ucrf'
+  | 'mfi-cdf';
 
 export interface FormatSpec {
   id: FormatId;
@@ -103,6 +112,19 @@ export interface FormatSpec {
   buildHeaderRow: (meta: FileMeta) => TypedRow;
   /** Builds the typed trailer row from computed counts + metadata. */
   buildTrailerRow: (counts: TrailerCounts, meta: FileMeta) => TypedRow;
+  /**
+   * Glue the header directly onto the first body record (no line break between
+   * them), so line 0 = header + record0. Real CRIF Consumer flat output does this.
+   */
+  glueHeaderToFirstRecord?: boolean;
+  /** Omit the trailer record entirely (flat Consumer output has none). */
+  omitTrailer?: boolean;
+  /**
+   * Input is a single flat sheet (one row per consumer), not one sheet per
+   * segment. Names the sheet + the 1-based label/data rows. When set, the reader
+   * maps each data row to a single body record using `body[0]`'s field labels.
+   */
+  flatInput?: { sheet: string; labelRow: number; firstDataRow: number };
 }
 
 export interface FileMeta {

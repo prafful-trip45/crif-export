@@ -25,6 +25,9 @@ export async function readWorkbook(
   buffer: Buffer | ArrayBuffer,
   format: FormatSpec,
 ): Promise<SegmentRow[]> {
+  // Flat-form formats (one row per consumer) use a dedicated reader.
+  if (format.flatInput) return readFlatWorkbook(buffer, format);
+
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as ArrayBuffer);
 
@@ -34,6 +37,49 @@ export async function readWorkbook(
     const ws = findSheet(wb, sheetName);
     if (!ws) continue; // optional segment sheet may be absent
     rows.push(...readSheet(ws, seg));
+  }
+  return rows;
+}
+
+/**
+ * Read a single flat sheet (real CRIF "Data Submission Form"): a label row maps
+ * columns to the single body record's field labels, and each subsequent row is
+ * one consumer record. Each row becomes its own borrower (acNo = row number).
+ */
+export async function readFlatWorkbook(
+  buffer: Buffer | ArrayBuffer,
+  format: FormatSpec,
+): Promise<SegmentRow[]> {
+  const { sheet, labelRow, firstDataRow } = format.flatInput!;
+  const seg = format.body[0]!;
+
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer as ArrayBuffer);
+  const ws = findSheet(wb, sheet);
+  if (!ws) throw new Error(`Input sheet "${sheet}" not found`);
+
+  // Map each label cell -> the field whose label matches.
+  const fieldByCol = new Map<number, string>();
+  ws.getRow(labelRow).eachCell({ includeEmpty: false }, (cell, col) => {
+    const header = normalize(String(cellRaw(cell) ?? ''));
+    const field = seg.fields.find((f) => normalize(f.label ?? '') === header || normalize(f.key) === header);
+    if (field) fieldByCol.set(col, field.key);
+  });
+
+  const rows: SegmentRow[] = [];
+  for (let r = firstDataRow; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const values: Record<string, ReturnType<typeof coerceCell>> = {};
+    let any = false;
+    for (const [col, key] of fieldByCol) {
+      const field = seg.fields.find((f) => f.key === key)!;
+      const raw = cellRaw(row.getCell(col));
+      const v = coerceCell(field, raw);
+      values[key] = v;
+      if (v !== undefined && String(v).trim() !== '') any = true;
+    }
+    if (!any) continue; // skip blank rows
+    rows.push({ tag: seg.tag, sheet: ws.name, acNo: `r${r}`, flag: seg.flag ?? 0, rowNumber: r, values });
   }
   return rows;
 }

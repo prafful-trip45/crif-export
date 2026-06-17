@@ -7,6 +7,7 @@ import type {
 } from '../core/types.js';
 import type { Borrower } from '../input/model.js';
 import { encodeCodedField } from './strategies/coded-field.js';
+import { encodeConcatenated } from './strategies/concatenated.js';
 import { encodeFixedWidth } from './strategies/fixed-width.js';
 import { encodePipeDelimited } from './strategies/pipe-delimited.js';
 
@@ -19,6 +20,8 @@ export function encodeSegment(seg: SegmentSpec, row: TypedRow): string {
       return encodePipeDelimited(seg, row);
     case 'coded-field':
       return encodeCodedField(seg, row);
+    case 'concatenated':
+      return encodeConcatenated(seg, row);
   }
 }
 
@@ -55,9 +58,10 @@ export function assemble(format: FormatSpec, borrowers: Borrower[], meta: FileMe
   const records: string[] = [];
 
   // Header
-  records.push(encodeSegment(format.header, format.buildHeaderRow(meta)));
+  const header = encodeSegment(format.header, format.buildHeaderRow(meta));
 
   // Body — group by borrower, segments already ordered by the grouper.
+  const bodyRecords: string[] = [];
   const bodyOrder = new Map(format.body.map((s, i) => [s.tag, i] as const));
   for (const borrower of borrowers) {
     const ordered = [...borrower.segments].sort((a, b) => {
@@ -67,13 +71,23 @@ export function assemble(format: FormatSpec, borrowers: Borrower[], meta: FileMe
     for (const seg of ordered) {
       const spec = format.body.find((s) => s.tag === seg.tag);
       if (!spec) continue;
-      records.push(encodeSegment(spec, seg.values));
+      bodyRecords.push(encodeSegment(spec, seg.values));
     }
   }
 
-  // Trailer
-  const counts = computeCounts(format, borrowers);
-  records.push(encodeSegment(format.trailer, format.buildTrailerRow(counts, meta)));
+  // Glue the header onto the first body record (flat Consumer): line 0 = header+rec0.
+  if (format.glueHeaderToFirstRecord && bodyRecords.length > 0) {
+    bodyRecords[0] = header + bodyRecords[0];
+    records.push(...bodyRecords);
+  } else {
+    records.push(header, ...bodyRecords);
+  }
+
+  // Trailer (unless the format omits it)
+  if (!format.omitTrailer) {
+    const counts = computeCounts(format, borrowers);
+    records.push(encodeSegment(format.trailer, format.buildTrailerRow(counts, meta)));
+  }
 
   if (format.physicalLayout === 'single-physical-line') {
     return records.join('') + format.lineEnding;
