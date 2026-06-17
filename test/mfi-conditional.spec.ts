@@ -29,7 +29,7 @@ async function workbook(disbursedDate: string): Promise<Buffer> {
     dateOfAccountInfo: '30042024', loanCategory: 'T02', loanPurpose: 'Loan', accountStatus: 'S04',
     disbursedDate, sanctionedAmount: 35000, disbursedAmount: 35000, currentBalance: 1845, amountOverdue: 0,
   });
-  return (await wb.xlsx.writeBuffer()) as Buffer;
+  return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
 describe('MFI conditional-mandatory (new disbursals from 1-Apr-2022)', () => {

@@ -18,7 +18,7 @@ async function buildWorkbook(
       ws.addRow([row._acNo, row._flag, ...dataFields.map((f) => (row[f.key] ?? '') as string)]);
     }
   }
-  return (await wb.xlsx.writeBuffer()) as Buffer;
+  return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
 describe('Full pipeline (workbook → bureau file)', () => {
