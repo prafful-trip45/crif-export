@@ -1,5 +1,21 @@
 import type { FieldSpec, FormatSpec, SegmentSpec, TypedRow } from '../core/types.js';
 import { formatDdmmccyy } from '../encoding/formatters/date.js';
+
+/**
+ * Per the CDF V2.0 rules, several fields became mandatory for all NEW disbursals
+ * on or after 1-Apr-2022. We treat an account as a new disbursal when its
+ * Date Opened/Disbursed is on/after that cutoff.
+ */
+const NEW_DISBURSAL_CUTOFF = Date.UTC(2022, 3, 1);
+function isNewDisbursal(row: TypedRow): boolean {
+  const d = row.disbursedDate;
+  if (d instanceof Date) return d.getTime() >= NEW_DISBURSAL_CUTOFF;
+  // disbursedDate may already be a DDMMCCYY string at validation time.
+  if (typeof d === 'string' && /^\d{8}$/.test(d)) {
+    return Date.UTC(+d.slice(4, 8), +d.slice(2, 4) - 1, +d.slice(0, 2)) >= NEW_DISBURSAL_CUTOFF;
+  }
+  return false;
+}
 import {
   ACCOUNT_STATUS,
   GENDER,
@@ -198,9 +214,9 @@ const ACTCRD: SegmentSpec = {
     p('appliedAmount', 'Applied For Amount', { type: 'numeric' }), // 17
     pReq('sanctionedAmount', 'Loan Amount Sanctioned', { type: 'numeric' }), // 18
     pReq('disbursedAmount', 'Total Amount Disbursed', { type: 'numeric' }), // 19
-    p('numInstallments', 'Number of Installments', { type: 'numeric' }), // 20
-    p('repaymentFrequency', 'Repayment Frequency', { enum: REPAYMENT_FREQUENCY }), // 21
-    p('installmentAmount', 'Installment Amount', { type: 'numeric' }), // 22
+    p('numInstallments', 'Number of Installments', { type: 'numeric', mandatory: isNewDisbursal }), // 20
+    p('repaymentFrequency', 'Repayment Frequency', { enum: REPAYMENT_FREQUENCY, mandatory: isNewDisbursal }), // 21
+    p('installmentAmount', 'Installment Amount', { type: 'numeric', mandatory: isNewDisbursal }), // 22
     pReq('currentBalance', 'Current Balance', { type: 'numeric' }), // 23
     pReq('amountOverdue', 'Amount Overdue', { type: 'numeric' }), // 24
     p('dpd', 'Days Past Due'), // 25
