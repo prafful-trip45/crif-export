@@ -1,12 +1,13 @@
 import type { FormatId, FormatSpec } from '../core/types.js';
 import { commercialUcrf } from './commercial-ucrf.js';
+import { consumerUcrf12 } from './consumer-ucrf12.js';
 import { mfiCdf } from './mfi-cdf.js';
 
 /** Registry of all supported bureau formats, keyed by id. */
 export const FORMATS: Record<FormatId, FormatSpec> = {
   'commercial-ucrf': commercialUcrf,
   'mfi-cdf': mfiCdf,
-  // 'consumer-ucrf12' registered in M3.
+  'consumer-ucrf12': consumerUcrf12,
 } as Record<FormatId, FormatSpec>;
 
 export function getFormat(id: FormatId): FormatSpec {

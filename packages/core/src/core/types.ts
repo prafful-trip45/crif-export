@@ -76,6 +76,12 @@ export interface SegmentSpec {
   emitTag?: boolean;
   /** For pipe-delimited records, whether the tag is itself the first pipe field. */
   tagAsField?: boolean;
+  /**
+   * Consumer `coded-field` only: literal bytes emitted immediately after
+   * `tag + version`, before the TLV field stream — the 1-char subtype + 2-digit
+   * record-type qualifier, e.g. "N01" (PN), "I01" (ID), "T00" (TL).
+   */
+  codedHeaderSuffix?: string;
 }
 
 export type FormatId = 'consumer-ucrf12' | 'commercial-ucrf' | 'mfi-cdf';
