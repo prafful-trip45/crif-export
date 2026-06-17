@@ -12,9 +12,8 @@
     "cli": "tsx packages/cli/src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b --noEmit",
-    "web:dev": "vite --config packages/web/vite.config.ts",
-    "web:build": "vite build --config packages/web/vite.config.ts",
+    "typecheck": "tsc --noEmit",
+    "web": "tsx packages/web/src/server.ts",
     "make:templates": "tsx scripts/make-templates.ts"
   },
   "dependencies": {

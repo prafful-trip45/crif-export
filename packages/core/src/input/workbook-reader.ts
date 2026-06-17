@@ -3,8 +3,12 @@ import type { FormatSpec, SegmentSpec } from '../core/types.js';
 import { coerceCell, type RawCell } from './coerce.js';
 import type { SegmentRow } from './model.js';
 
-/** Column header names treated as control columns (not data fields). */
-const AC_NO_HEADERS = ['a/c no.', 'a/c no', 'acno', 'account no', 'account number', 'acc no'];
+/**
+ * Column header names treated as the borrower join-key control column.
+ * Deliberately narrow: must NOT collide with a real data field like
+ * "Account Number" (a CR field), so we only accept the "A/c No." spellings.
+ */
+const AC_NO_HEADERS = ['a/c no.', 'a/c no', 'acno', 'a/c number', 'borrower id', 'borrower key'];
 const FLAG_HEADERS = ['flag'];
 
 /**
@@ -43,7 +47,7 @@ function readSheet(ws: ExcelJS.Worksheet, seg: SegmentSpec): SegmentRow[] {
   const headerRow = ws.getRow(1);
   const headerMap = new Map<number, string>(); // colIndex -> normalized header
   headerRow.eachCell({ includeEmpty: false }, (cell, col) => {
-    headerMap.set(col, normalize(cellRaw(cell)));
+    headerMap.set(col, normalize(String(cellRaw(cell) ?? '')));
   });
 
   // Resolve which column carries each field, and the control columns.
