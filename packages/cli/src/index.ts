@@ -34,6 +34,7 @@ program
   .option('--reporting-date <ddmmyyyy>', 'reporting / cycle date (DDMMYYYY)', today())
   .option('--creation-date <ddmmyyyy>', 'file creation date (DDMMYYYY)', today())
   .option('--password <pw>', 'reporting password (MFI/Consumer)')
+  .option('--report <file>', 'also write the multi-sheet workbook report (.xlsx, one sheet per segment + sorting)')
   .option('--allow-warnings', 'emit the file even with non-blocking warnings', false)
   .action(async (opts) => {
     const formatId = opts.format as FormatId;
@@ -54,7 +55,10 @@ program
       password: opts.password,
     };
 
-    const result = await convert(buf, format, meta, { allowWarnings: opts.allowWarnings });
+    const result = await convert(buf, format, meta, {
+      allowWarnings: opts.allowWarnings,
+      report: Boolean(opts.report),
+    });
     printReport(result.report);
 
     if (!result.output) {
@@ -69,6 +73,10 @@ program
         `\n✓ Wrote ${out} (${result.output.length} bytes, ${result.counts?.borrowerCount} borrowers, ${result.counts?.accountCount} accounts).`,
       ),
     );
+    if (result.reportWorkbook) {
+      writeFileSync(opts.report, result.reportWorkbook);
+      console.log(chalk.green(`✓ Wrote ${opts.report} (multi-sheet workbook report).`));
+    }
     if (result.report.warnings.length) {
       console.log(chalk.yellow(`  with ${result.report.warnings.length} warning(s).`));
     }

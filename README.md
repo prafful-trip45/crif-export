@@ -8,9 +8,9 @@ Supports three bureau formats:
 
 | Format | For | Output | Layout |
 |---|---|---|---|
-| **Commercial UCRF V3.9** | business / corporate loans | `.txt` | pipe-delimited records |
+| **Commercial UCRF** | business / corporate loans | `.txt` | pipe-delimited records |
 | **MFI CDF V2.0** | microfinance loans | `.CDF` | one physical line: fixed-width header/trailer + pipe segments |
-| **Consumer UCRF-12 V3.73** | retail / individual loans | `.txt` | self-describing coded fields (`[tag][len][value]`) + 146-char fixed header |
+| **Consumer UCRF-12** | retail / individual loans | `.txt` | self-describing coded fields (`[tag][len][value]`) + 146-char fixed header |
 
 ## How it works
 
@@ -32,7 +32,26 @@ Excel (one sheet per segment)
 If validation finds **errors**, the data file is suppressed and only the report is returned
 (override with `--allow-warnings` for warning-only runs).
 
-## Input model
+## Input models
+
+The engine reads two input shapes:
+
+1. **One sheet per segment** (the canonical template shape) — see below.
+2. **Flat real-world sheets** maintained by accountants, where one row holds a whole
+   borrower/consumer across many column groups. These map to dedicated *flat* format
+   ids that explode each row into the proper segments:
+   - `commercial-ucrf-flat` — a Commercial **"Master Sheet"** (Borrower / Related Person
+     / Guarantor / Security / Cheque-Dishonour columns side by side, plus a
+     **"Credit Type Code"** lookup sheet) → `HD/BS/AS/RS/CR/(GS/SS/CD)/TS` `.txt`.
+   - `consumer-ucrf12-flat` — a Consumer **"Data Submission Form"** → concatenated TUDF `.txt`.
+
+   Values the flat sheet doesn't carry (member id, dates, branch code `HO`, relationship
+   DUNS, currency `INR`, telephone area code, …) come from CLI flags + built-in defaults.
+   Coded columns accept either the legend **number** or the legend **label** (e.g. Account
+   Status `Open` or `1`). **Credit Type** is resolved against the workbook's *Credit Type
+   Code* sheet; an unmatched term (e.g. `Loan`) is a blocking error so staff fix the source.
+
+### One sheet per segment
 
 One Excel sheet per segment (sheet name = segment tag: `BS`, `AS`, `CR`, … / `CNSCRD`,
 `ADRCRD`, `ACTCRD` / `PN`, `ID`, `PT`, `PA`, `TL`). Row 1 = field labels. Every data row
@@ -54,15 +73,29 @@ npm run make:templates      # writes templates/<format>-input.xlsx
 npm run cli -- formats                       # list supported formats
 
 npm run cli -- convert \
-  --format commercial-ucrf \
+  --format commercial-ucrf-flat \
   --in path/to/data.xlsx \
   --member-id NBF1111111 \
   --reporting-date 30042024 \
   --out submission.txt
+
+# real-world flat commercial sheet → CRIF .txt + accountant-style workbook report
+npm run cli -- convert \
+  --format commercial-ucrf-flat \
+  --in "commercial-input.xlsx" \
+  --member-id NBFCHE3014 --reporting-date 31012026 --creation-date 26032026 \
+  --out submission.txt --report submission-report.xlsx
 ```
 
 Mandatory: `--format`, `--in`, `--member-id`. Common: `--reporting-date DDMMYYYY`,
-`--member-name` (MFI), `--password`, `--allow-warnings`, `--out`.
+`--creation-date DDMMYYYY`, `--member-name` (MFI), `--password`, `--allow-warnings`, `--out`,
+`--report <file.xlsx>`.
+
+**`--report`** also writes the multi-sheet workbook (one sheet per segment — HD/BS/AS/RS/CR/GS/SS/CD/TS,
+each with the parsed columns + a `Final Formula` pipe record — plus a `sorting` sheet listing every
+record in upload order), mirroring the accountant working file. For `commercial-ucrf-flat`, Member ID /
+Reporting / Creation date are read from the Master Sheet header cells (B5/B6/B7) when filled, otherwise
+from the flags.
 
 ## Web portal
 
@@ -72,10 +105,12 @@ npm run web        # http://localhost:4317
 
 A local page (served by a tiny Node server using the same engine) with:
 
-- a **format / portal dropdown** (and member-id / dates / password fields),
+- a **format / portal dropdown** (and member-id / reporting + creation date / password fields),
+- a **"generate workbook report"** checkbox (the multi-sheet `.xlsx`),
 - **two input modes** — type a **local folder path** (the server reads the `.xlsx` from
   disk) **or drag-and-drop** a file directly,
-- an inline **validation report** table and a **download** button for the generated file.
+- an inline **validation report** table and **download** buttons for the generated `.txt`
+  and (when requested) the workbook report.
 
 The folder-path mode needs the local server (a browser cannot read arbitrary filesystem
 paths); drag-drop works purely client-side. Both feed the one engine.

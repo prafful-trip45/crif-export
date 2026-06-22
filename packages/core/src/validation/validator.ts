@@ -27,6 +27,20 @@ export function validate(format: FormatSpec, borrowers: Borrower[]): ValidationR
 }
 
 function validateRow(report: ValidationReport, spec: SegmentSpec, row: SegmentRow): void {
+  // Surface issues raised while reading/mapping the row (e.g. an unmatched lookup).
+  for (const ri of row.readerIssues ?? []) {
+    report.add({
+      severity: 'error',
+      sheet: row.sheet,
+      acNo: row.acNo,
+      rowNumber: row.rowNumber,
+      fieldKey: ri.fieldKey,
+      rule: 'lookup',
+      message: ri.message,
+      value: row.values[ri.fieldKey],
+    });
+  }
+
   for (const field of spec.fields) {
     const value = row.values[field.key];
     const raw = formatValue(field, value);

@@ -63,6 +63,9 @@ export function assemble(format: FormatSpec, borrowers: Borrower[], meta: FileMe
   // Body — group by borrower, segments already ordered by the grouper.
   const bodyRecords: string[] = [];
   const bodyOrder = new Map(format.body.map((s, i) => [s.tag, i] as const));
+  // Flat Consumer: stamp the CRIF-assigned member id into each record's member-code
+  // field, overriding the raw member id the accountant typed in the sheet.
+  const memberIdField = format.flatInput?.memberIdField;
   for (const borrower of borrowers) {
     const ordered = [...borrower.segments].sort((a, b) => {
       if (a.flag !== b.flag) return a.flag - b.flag;
@@ -71,7 +74,8 @@ export function assemble(format: FormatSpec, borrowers: Borrower[], meta: FileMe
     for (const seg of ordered) {
       const spec = format.body.find((s) => s.tag === seg.tag);
       if (!spec) continue;
-      bodyRecords.push(encodeSegment(spec, seg.values));
+      const values = memberIdField ? { ...seg.values, [memberIdField]: meta.memberId } : seg.values;
+      bodyRecords.push(encodeSegment(spec, values));
     }
   }
 
@@ -92,7 +96,9 @@ export function assemble(format: FormatSpec, borrowers: Borrower[], meta: FileMe
   if (format.physicalLayout === 'single-physical-line') {
     return records.join('') + format.lineEnding;
   }
-  // One line per record; trailing line ending included to match CRIF samples
-  // where the final record is followed by CRLF... (overridable per format).
-  return records.join(format.lineEnding);
+  // One line per record. Real CRIF Commercial files terminate the final record
+  // with a trailing line ending too (opt-in via `trailingLineEnding`); the older
+  // golden fixtures omit it, so the default keeps no trailing newline.
+  const joined = records.join(format.lineEnding);
+  return format.trailingLineEnding ? joined + format.lineEnding : joined;
 }

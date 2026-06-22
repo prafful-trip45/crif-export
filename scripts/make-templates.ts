@@ -16,6 +16,32 @@ const outDir = join(here, '..', 'templates');
 mkdirSync(outDir, { recursive: true });
 
 for (const format of Object.values(FORMATS)) {
+  // Flat-explode formats (real-world Master Sheet) get a dedicated flat template
+  // with the top-of-sheet header cells (Member ID / Reporting / Creation Date).
+  if (format.flatExplode) {
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'crif-export';
+    const ws = wb.addWorksheet(format.flatExplode.sheet);
+    ws.getCell('A5').value = 'Member ID';
+    ws.getCell('A6').value = 'Reporting / Cycle Date';
+    ws.getCell('A7').value = 'Date of Creation & Certification';
+    ['A5', 'A6', 'A7'].forEach((a) => (ws.getCell(a).font = { bold: true }));
+    // One labeled column per mapped input key, on the format's label row above data.
+    const labelRow = format.flatExplode.firstDataRow - 1;
+    let col = 1;
+    for (const key of Object.values(format.flatExplode.columns)) {
+      const cell = ws.getCell(labelRow, col);
+      cell.value = key;
+      cell.font = { bold: true };
+      ws.getColumn(col).width = 18;
+      col += 1;
+    }
+    const file = join(outDir, `${format.id}-input.xlsx`);
+    await wb.xlsx.writeFile(file);
+    console.log(`wrote ${file}`);
+    continue;
+  }
+
   const wb = new ExcelJS.Workbook();
   wb.creator = 'crif-export';
 

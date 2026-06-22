@@ -1,4 +1,10 @@
-/** Single-page UI for the local portal (inline HTML/CSS/JS, no build step). */
+/**
+ * Single-page UI for the PUBLIC Cloudflare Worker portal.
+ *
+ * This is the drag-drop-only variant of the local portal page: the "local folder
+ * path" mode is intentionally absent (a public server must not read arbitrary
+ * filesystem paths). Inline HTML/CSS/JS, no build step.
+ */
 export const PAGE_HTML = /* html */ `<!doctype html>
 <html lang="en">
 <head>
@@ -17,9 +23,6 @@ export const PAGE_HTML = /* html */ `<!doctype html>
   .hint { color:var(--muted); font-weight:400; font-size:12px; }
   select, input[type=text], input[type=password] { width:100%; padding:9px 11px; background:#0d1117; border:1px solid var(--line); border-radius:8px; color:var(--ink); }
   .row { display:flex; gap:14px; } .row > div { flex:1; }
-  .tabs { display:flex; gap:8px; margin:6px 0 12px; }
-  .tab { padding:8px 14px; border:1px solid var(--line); border-radius:8px; cursor:pointer; background:#0d1117; color:var(--muted); }
-  .tab.active { border-color:var(--accent); color:var(--ink); }
   .drop { border:2px dashed var(--line); border-radius:10px; padding:30px; text-align:center; color:var(--muted); cursor:pointer; }
   .drop.over { border-color:var(--accent); color:var(--ink); }
   button.go { margin-top:18px; width:100%; padding:12px; font-weight:700; font-size:15px; background:var(--accent); color:#fff; border:0; border-radius:9px; cursor:pointer; }
@@ -77,24 +80,10 @@ export const PAGE_HTML = /* html */ `<!doctype html>
   </div>
 
   <div class="card">
-    <label>Input source</label>
-    <div class="tabs">
-      <div class="tab active" data-mode="folder">Local folder path</div>
-      <div class="tab" data-mode="drop">Drag &amp; drop file</div>
-    </div>
-
-    <div id="modeFolder">
-      <label>Folder containing the Excel file(s) <span class="hint">absolute path on this machine</span></label>
-      <input type="text" id="folder" placeholder="/Users/me/Desktop/submissions"/>
-      <label>File <span class="hint">(picked from the folder)</span></label>
-      <select id="folderFile"><option value="">— type a folder path above —</option></select>
-    </div>
-
-    <div id="modeDrop" class="hidden">
-      <div class="drop" id="drop">Drop a <code>.xlsx</code> here, or click to choose</div>
-      <input type="file" id="file" accept=".xlsx" class="hidden"/>
-      <div id="fileName" class="hint"></div>
-    </div>
+    <label>Input file</label>
+    <div class="drop" id="drop">Drop a <code>.xlsx</code> here, or click to choose</div>
+    <input type="file" id="file" accept=".xlsx" class="hidden"/>
+    <div id="fileName" class="hint"></div>
   </div>
 
   <button class="go" id="go" disabled>Generate submission file</button>
@@ -103,7 +92,6 @@ export const PAGE_HTML = /* html */ `<!doctype html>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let mode = 'folder';
 let uploadB64 = null, uploadName = null;
 
 async function init() {
@@ -112,27 +100,6 @@ async function init() {
   refreshGo();
 }
 init();
-
-document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
-  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-  t.classList.add('active'); mode = t.dataset.mode;
-  $('modeFolder').classList.toggle('hidden', mode!=='folder');
-  $('modeDrop').classList.toggle('hidden', mode!=='drop');
-  refreshGo();
-});
-
-$('folder').addEventListener('change', async () => {
-  const folder = $('folder').value.trim(); if (!folder) return;
-  try {
-    const r = await (await fetch('/api/resolve-folder',{method:'POST',body:JSON.stringify({folder})})).json();
-    if (r.error) { $('folderFile').innerHTML = '<option value="">'+r.error+'</option>'; return; }
-    $('folderFile').innerHTML = r.files.length
-      ? r.files.map(f => '<option value="'+f+'">'+f.split('/').pop()+'</option>').join('')
-      : '<option value="">no .xlsx files found</option>';
-  } catch(e){ $('folderFile').innerHTML = '<option value="">'+e.message+'</option>'; }
-  refreshGo();
-});
-$('folderFile').addEventListener('change', refreshGo);
 
 const drop = $('drop');
 drop.onclick = () => $('file').click();
@@ -150,8 +117,7 @@ function handleFile(f) {
 }
 
 function refreshGo() {
-  const hasInput = mode==='folder' ? !!$('folderFile').value : !!uploadB64;
-  $('go').disabled = !($('memberId').value.trim() && hasInput);
+  $('go').disabled = !($('memberId').value.trim() && uploadB64);
 }
 ['memberId','format'].forEach(id => $(id).addEventListener('input', refreshGo));
 
@@ -165,10 +131,8 @@ $('go').onclick = async () => {
     reportingDate: toDdmmyyyy($('reportingDate').value),
     creationDate: toDdmmyyyy($('creationDate').value) || toDdmmyyyy($('reportingDate').value),
     report: $('report').checked,
+    fileBase64: uploadB64,
   };
-  if (mode==='folder') payload.filePath = $('folderFile').value;
-  else { payload.fileBase64 = uploadB64; }
-
   try {
     const r = await (await fetch('/api/convert',{method:'POST',body:JSON.stringify(payload)})).json();
     render(r);
@@ -182,7 +146,7 @@ function render(r){
   if (r.error){ $('result').innerHTML = '<span class="pill err">ERROR</span> '+r.error; return; }
   let html = r.ok ? '<span class="pill ok">VALID</span>' : '<span class="pill err">'+r.issues.filter(i=>i.severity==='error').length+' ERRORS — file not generated</span>';
   if (r.counts) html += ' &nbsp; '+r.counts.borrowerCount+' borrowers · '+r.counts.accountCount+' accounts';
-  if (r.issues.length){
+  if (r.issues && r.issues.length){
     html += '<table><tr><th>Severity</th><th>Sheet</th><th>Row</th><th>Field</th><th>Message</th></tr>';
     html += r.issues.map(i => '<tr><td class="sev-'+i.severity+'">'+i.severity+'</td><td>'+i.sheet+'</td><td>'+i.rowNumber+'</td><td>'+i.fieldKey+'</td><td>'+i.message+'</td></tr>').join('');
     html += '</table>';

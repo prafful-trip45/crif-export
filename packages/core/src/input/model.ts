@@ -12,6 +12,11 @@ export interface SegmentRow {
   /** 1-based Excel row number, for error reporting. */
   rowNumber: number;
   values: TypedRow;
+  /**
+   * Issues raised while reading/mapping this row (e.g. a flat-explode lookup that
+   * failed). Surfaced verbatim by the validator so the report shows them.
+   */
+  readerIssues?: Array<{ fieldKey: string; message: string }>;
 }
 
 /** All segment rows sharing one `A/c No.`, i.e. one borrower's full record. */

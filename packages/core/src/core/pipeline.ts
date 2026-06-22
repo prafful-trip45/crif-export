@@ -1,7 +1,8 @@
 import { assemble, computeCounts } from '../encoding/engine.js';
 import { groupByBorrower } from '../input/grouper.js';
-import { readWorkbook } from '../input/workbook-reader.js';
+import { readFlatHeaderOverrides, readWorkbook } from '../input/workbook-reader.js';
 import { toBuffer } from '../output/file-writer.js';
+import { writeReport } from '../output/report-writer.js';
 import { validate } from '../validation/validator.js';
 import type { ConvertResult } from './result.js';
 import type { FileMeta, FormatSpec } from './types.js';
@@ -9,6 +10,12 @@ import type { FileMeta, FormatSpec } from './types.js';
 export interface ConvertOptions {
   /** Emit the data file even when only warnings (never errors) are present. */
   allowWarnings?: boolean;
+  /**
+   * Also produce the multi-sheet workbook report (accountant working-file style:
+   * one sheet per segment + a `sorting` sheet). Returned as `result.report`Buffer
+   * via `reportWorkbook`.
+   */
+  report?: boolean;
 }
 
 /**
@@ -31,7 +38,13 @@ export async function convert(
     return { report, counts };
   }
 
-  const text = assemble(format, borrowers, meta);
+  // Flat formats may carry file-level header values (Member ID / dates) in the
+  // sheet itself; a non-blank sheet cell overrides the corresponding meta flag.
+  const overrides = await readFlatHeaderOverrides(buffer, format);
+  const effectiveMeta: FileMeta = { ...meta, ...overrides };
+
+  const text = assemble(format, borrowers, effectiveMeta);
   const output = toBuffer(format, text);
-  return { report, output, outputText: text, counts };
+  const reportWorkbook = options.report ? await writeReport(format, borrowers, effectiveMeta) : undefined;
+  return { report, output, outputText: text, counts, reportWorkbook };
 }

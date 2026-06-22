@@ -1,0 +1,17 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "crif-export-cic",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  // Buffer / zlib / stream polyfills ExcelJS relies on.
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "routes": [
+    {
+      "pattern": "cic.vidyasetu.net",
+      "custom_domain": true
+    }
+  ]
+  // BASIC_AUTH is set as a secret:  wrangler secret put BASIC_AUTH
+  // (value form: "user:password")
+}

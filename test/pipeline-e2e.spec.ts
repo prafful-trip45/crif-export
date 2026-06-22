@@ -2,13 +2,21 @@ import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
 import { convert } from '../packages/core/src/core/pipeline.js';
 import { getFormat } from '../packages/core/src/formats/index.js';
+import type { FormatSpec } from '../packages/core/src/core/types.js';
+import { commercialUcrf } from '../packages/core/src/formats/commercial-ucrf.js';
+
+// The per-segment Commercial UCRF spec is no longer in the user-facing registry
+// (only the flat profiles are exposed), but it remains the source of truth for
+// the encoding engine; reference it directly for the one-sheet-per-segment e2e.
+const SPECS: Record<string, FormatSpec> = { 'commercial-ucrf': commercialUcrf };
+const specFor = (id: string): FormatSpec => SPECS[id] ?? getFormat(id as never);
 
 /** Build an in-memory xlsx with one sheet per segment, headers = field labels. */
 async function buildWorkbook(
   formatId: 'commercial-ucrf' | 'mfi-cdf' | 'consumer-ucrf12',
   sheets: Record<string, Array<Record<string, unknown> & { _acNo: string; _flag: number }>>,
 ): Promise<Buffer> {
-  const format = getFormat(formatId);
+  const format = specFor(formatId);
   const wb = new ExcelJS.Workbook();
   for (const seg of format.body) {
     const ws = wb.addWorksheet(seg.tag);
@@ -29,7 +37,7 @@ describe('Full pipeline (workbook → bureau file)', () => {
       CR: [{ _acNo: 'A1', _flag: 4, accountNumber: '900001', sanctionDate: '14092013', sanctionedAmount: 5000000, currencyCode: 'INR' }],
     });
 
-    const result = await convert(buf, getFormat('commercial-ucrf'), {
+    const result = await convert(buf, specFor('commercial-ucrf'), {
       memberId: 'NBF9000001',
       reportingDate: new Date(Date.UTC(2024, 3, 30)),
       creationDate: new Date(Date.UTC(2024, 3, 30)),
@@ -52,7 +60,7 @@ describe('Full pipeline (workbook → bureau file)', () => {
       CR: [{ _acNo: 'A1', _flag: 4, accountNumber: '900001', sanctionedAmount: 5000000, currencyCode: 'INR' }],
     });
 
-    const result = await convert(buf, getFormat('commercial-ucrf'), {
+    const result = await convert(buf, specFor('commercial-ucrf'), {
       memberId: 'NBF9000001',
       reportingDate: new Date(),
       creationDate: new Date(),
@@ -71,7 +79,7 @@ describe('Full pipeline (workbook → bureau file)', () => {
       AS: [{ _acNo: 'A1', _flag: 2, addressLine1: 'addr' }],
       CR: [{ _acNo: 'A1', _flag: 4, accountNumber: '1', sanctionDate: '01012020', sanctionedAmount: 1, currencyCode: 'INR' }],
     });
-    const result = await convert(buf, getFormat('commercial-ucrf'), {
+    const result = await convert(buf, specFor('commercial-ucrf'), {
       memberId: 'M', reportingDate: new Date(), creationDate: new Date(),
     });
     expect(result.report.errors.some((e) => e.fieldKey === 'pan' && e.rule === 'format')).toBe(true);

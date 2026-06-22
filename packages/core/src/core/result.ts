@@ -4,7 +4,8 @@ export type ValidationRule =
   | 'enum'
   | 'length'
   | 'cardinality'
-  | 'date';
+  | 'date'
+  | 'lookup';
 
 export type Severity = 'error' | 'warning';
 
@@ -49,6 +50,8 @@ export interface ConvertResult {
   output?: Buffer;
   /** The output as a string, for display. */
   outputText?: string;
+  /** The multi-sheet workbook report (when `report: true` was requested). */
+  reportWorkbook?: Buffer;
   counts?: {
     borrowerCount: number;
     accountCount: number;

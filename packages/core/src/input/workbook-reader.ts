@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import type { FormatSpec, SegmentSpec } from '../core/types.js';
+import type { FieldValue, FlatExplodeContext, FormatSpec, SegmentSpec } from '../core/types.js';
 import { coerceCell, type RawCell } from './coerce.js';
 import type { SegmentRow } from './model.js';
 
@@ -25,6 +25,8 @@ export async function readWorkbook(
   buffer: Buffer | ArrayBuffer,
   format: FormatSpec,
 ): Promise<SegmentRow[]> {
+  // Real-world flat "Master Sheet": one borrower row explodes into many segments.
+  if (format.flatExplode) return readFlatExplodeWorkbook(buffer, format);
   // Flat-form formats (one row per consumer) use a dedicated reader.
   if (format.flatInput) return readFlatWorkbook(buffer, format);
 
@@ -82,6 +84,125 @@ export async function readFlatWorkbook(
     rows.push({ tag: seg.tag, sheet: ws.name, acNo: `r${r}`, flag: seg.flag ?? 0, rowNumber: r, values });
   }
   return rows;
+}
+
+/**
+ * Read a real-world flat "Master Sheet" where each borrower occupies ONE row with
+ * borrower / related-person / guarantor / security / cheque columns side by side,
+ * and explode each row into the per-segment records the format declares. All the
+ * format-specific mapping (legend codes, address parsing, lookups) lives in the
+ * format's `flatExplode.explode` callback; this reader only wires columns + the
+ * "Credit Type Code" auxiliary lookup, then collects the produced seeds.
+ */
+export async function readFlatExplodeWorkbook(
+  buffer: Buffer | ArrayBuffer,
+  format: FormatSpec,
+): Promise<SegmentRow[]> {
+  const { sheet, firstDataRow, columns, explode } = format.flatExplode!;
+
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer as ArrayBuffer);
+  const ws = findSheet(wb, sheet);
+  if (!ws) throw new Error(`Input sheet "${sheet}" not found`);
+
+  const lookups = { creditType: readCreditTypeLookup(wb) };
+
+  const colToKey = new Map<number, string>();
+  for (const [letter, key] of Object.entries(columns)) colToKey.set(colLetterToNumber(letter), key);
+
+  const rows: SegmentRow[] = [];
+  for (let r = firstDataRow; r <= ws.rowCount; r++) {
+    const wsRow = ws.getRow(r);
+    const input: Record<string, FieldValue> = {};
+    let any = false;
+    for (const [col, key] of colToKey) {
+      const raw = cellRaw(wsRow.getCell(col));
+      const v = normalizeRaw(raw);
+      input[key] = v;
+      if (v !== undefined && String(v).trim() !== '') any = true;
+    }
+    if (!any) continue; // skip blank rows
+
+    const ctx: FlatExplodeContext = { rowNumber: r, lookups };
+    const seeds = explode(input, ctx);
+    for (const seed of seeds) {
+      rows.push({
+        tag: seed.tag,
+        sheet: seed.tag,
+        acNo: `r${r}`,
+        flag: seed.flag,
+        rowNumber: r,
+        values: seed.values,
+        readerIssues: seed.issues,
+      });
+    }
+  }
+  return rows;
+}
+
+/**
+ * Read the file-level header overrides an accountant fills in the flat sheet's top
+ * rows (e.g. Member ID / Reporting Date / Creation Date), per `flatExplode.headerCells`.
+ * Returns a partial FileMeta; blank cells are omitted so the CLI flag wins.
+ */
+export async function readFlatHeaderOverrides(
+  buffer: Buffer | ArrayBuffer,
+  format: FormatSpec,
+): Promise<Partial<Record<string, FieldValue>>> {
+  const cells = format.flatExplode?.headerCells ?? format.flatInput?.headerCells;
+  const sheet = format.flatExplode?.sheet ?? format.flatInput?.sheet;
+  if (!cells || !sheet) return {};
+
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer as ArrayBuffer);
+  const ws = findSheet(wb, sheet);
+  if (!ws) return {};
+
+  const out: Record<string, FieldValue> = {};
+  for (const [addr, key] of Object.entries(cells)) {
+    const raw = cellRaw(ws.getCell(addr));
+    const v = normalizeRaw(raw);
+    if (v === undefined || String(v).trim() === '') continue;
+    if (key === 'reportingDate' || key === 'creationDate') {
+      const d = coerceCell({ key, type: 'date-ddmmyyyy', mandatory: false }, v as RawCell);
+      out[key] = d;
+    } else {
+      out[key] = String(v).trim();
+    }
+  }
+  return out;
+}
+
+/**
+ * Read the "Credit Type Code" auxiliary sheet (Description -> Code), if present.
+ * Keys are normalized (lowercased, collapsed whitespace) for tolerant matching.
+ */
+function readCreditTypeLookup(wb: ExcelJS.Workbook): Map<string, string> {
+  const map = new Map<string, string>();
+  const ws = findSheet(wb, 'Credit Type Code');
+  if (!ws) return map;
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    const code = String(cellRaw(row.getCell(2)) ?? '').trim(); // col B = Code
+    const desc = normalize(String(cellRaw(row.getCell(3)) ?? '')); // col C = Description
+    if (code && desc && /^\d+$/.test(code)) map.set(desc, code);
+  });
+  return map;
+}
+
+/** A-only-ish raw value: Dates stay Date, numbers stay number, else trimmed string. */
+function normalizeRaw(raw: RawCell): FieldValue {
+  if (raw === null || raw === undefined || raw === '') return undefined;
+  if (raw instanceof Date) return raw;
+  if (typeof raw === 'number') return raw;
+  if (typeof raw === 'boolean') return String(raw);
+  return String(raw).trim();
+}
+
+/** "A" -> 1, "Z" -> 26, "AA" -> 27, ... */
+function colLetterToNumber(letters: string): number {
+  let n = 0;
+  for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n;
 }
 
 function findSheet(wb: ExcelJS.Workbook, name: string): ExcelJS.Worksheet | undefined {

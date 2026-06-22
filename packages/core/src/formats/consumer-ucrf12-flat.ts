@@ -61,7 +61,7 @@ const RECORD: SegmentSpec = {
   ],
 };
 
-/** 146-byte fixed-width TUDF header (per spec; populated from the input form). */
+/** Fixed-width TUDF header field helper. */
 const fw = (key: string, label: string, length: number, extra: Partial<FieldSpec> = {}): FieldSpec => ({
   key,
   label,
@@ -73,21 +73,41 @@ const fw = (key: string, label: string, length: number, extra: Partial<FieldSpec
   ...extra,
 });
 
+const date8 = (key: string, label: string): FieldSpec => ({
+  key,
+  label,
+  type: 'date-ddmmyyyy',
+  length: 8,
+  pad: 'right',
+  padChar: ' ',
+  mandatory: false,
+});
+
+/**
+ * 155-byte fixed-width TUDF header, verified byte-for-byte against the production
+ * sample (training-references/crif-reporting-io/client-output-consumer-output-1.txt):
+ *
+ *   TUDF | memberId(30) | shortName(16) | filler(3) | creationDate(8) |
+ *   filler(12) | reportingDate(8) | filler(74)   =  4+30+16+3+8+12+8+74 = 155
+ *
+ * Unlike the canonical spec header this profile emits NO version field (memberId
+ * starts at offset 4, right after TUDF) and NO password — only the two dates
+ * (file creation date, then the cycle reporting date) sit in the otherwise-blank
+ * positional layout. `memberId` is the CRIF-assigned id, not the raw sheet value.
+ */
 const TUDF: SegmentSpec = {
   tag: 'TUDF',
   encoding: 'fixed-width',
   cardinality: 'header',
   fields: [
     fw('_recordType', 'Record Type', 4, { default: 'TUDF', mandatory: true }),
-    fw('version', 'Version', 2, { default: '12', mandatory: true }),
     fw('memberId', 'Reporting Member / Processor ID', 30, { mandatory: true }),
     fw('memberShortName', 'Reporting Member Short Name', 16),
-    fw('cycleId', 'Cycle Identification', 2),
-    { key: 'reportingDate', label: 'Date Reported & Certified', type: 'date-ddmmyyyy', length: 8, pad: 'right', padChar: ' ', mandatory: true },
-    fw('password', 'Reporting Password', 30, { mandatory: true }),
-    fw('authMethod', 'Authentication Method', 1, { default: 'A' }),
-    fw('futureUse', 'Future Use', 5, { default: '00000' }),
-    fw('memberData', 'Member Data', 48),
+    fw('_filler1', 'Filler', 3),
+    date8('creationDate', 'Date Created'),
+    fw('_filler2', 'Filler', 12),
+    date8('reportingDate', 'Date Reported & Certified'),
+    fw('_filler3', 'Filler', 74),
   ],
 };
 
@@ -96,7 +116,7 @@ const NO_TRAILER: SegmentSpec = { tag: 'NONE', encoding: 'fixed-width', cardinal
 
 export const consumerUcrf12Flat: FormatSpec = {
   id: 'consumer-ucrf12-flat',
-  label: 'Consumer UCRF-12 (Data Submission Form)',
+  label: 'Consumer UCRF-12',
   version: '3.73',
   outputExtension: '.txt',
   physicalLayout: 'one-line-per-record',
@@ -104,21 +124,27 @@ export const consumerUcrf12Flat: FormatSpec = {
   fileEncoding: 'latin1',
   glueHeaderToFirstRecord: true,
   omitTrailer: true,
-  flatInput: { sheet: 'Data Submission Form', labelRow: 10, firstDataRow: 11 },
+  // `memberCode` (col AH) carries the raw member id the accountant typed; the real
+  // output stamps the CRIF-assigned `meta.memberId` into it instead.
+  // `headerCells` pulls the short name / reporting date / password the accountant
+  // fills in the form's header row (R6) — memberId is deliberately excluded (the
+  // sheet holds the raw id; the CRIF id comes from the CLI flag).
+  flatInput: {
+    sheet: 'Data Submission Form',
+    labelRow: 10,
+    firstDataRow: 11,
+    memberIdField: 'memberCode',
+    headerCells: { B6: 'memberShortName', D6: 'reportingDate', E6: 'password' },
+  },
   header: TUDF,
   body: [RECORD],
   trailer: NO_TRAILER,
   buildHeaderRow: (meta): TypedRow => ({
     _recordType: 'TUDF',
-    version: '12',
     memberId: meta.memberId,
     memberShortName: (meta.memberShortName as string) ?? '',
-    cycleId: (meta.cycleId as string) ?? '',
+    creationDate: formatDdmmyyyy(meta.creationDate),
     reportingDate: formatDdmmyyyy(meta.reportingDate),
-    password: meta.password ?? '',
-    authMethod: (meta.authMethod as string) ?? 'A',
-    futureUse: '00000',
-    memberData: '',
   }),
   buildTrailerRow: (): TypedRow => ({}),
 };

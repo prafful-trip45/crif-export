@@ -1,0 +1,6 @@
+HD|NBFCHE3014||26032026|31012026|01|
+BS|HO||APL Infotech Limited||||AACCA3994L|||||12|06|06|||||||||||||
+AS|01||D' Building, Shivsagar Estate, 6th Floor, Dr. Annie Besant Road,Worli|||Mumbai|Maharashtra|20|400018|079|||||||
+RS|999999999|2|51||||Mr|HEMANT KUMAR RUIA|01|||24021958|AADPR8349A||||||||||||Mimraj Building, 405, Kalbadevi Road,  |||Mumbai|Maharashtra|20|400002|079|2222015336||||||
+CR|24020500002081||28062010|120000000|INR|5200||05|120000000|94510000||||0001||0|||||||||01|||||||||0|0|00|||||||
+TS|1|1|

@@ -93,6 +93,7 @@ export type FormatId =
   | 'consumer-ucrf12'
   | 'consumer-ucrf12-flat'
   | 'commercial-ucrf'
+  | 'commercial-ucrf-flat'
   | 'mfi-cdf';
 
 export interface FormatSpec {
@@ -120,11 +121,74 @@ export interface FormatSpec {
   /** Omit the trailer record entirely (flat Consumer output has none). */
   omitTrailer?: boolean;
   /**
+   * Append the line ending after the final record too (real CRIF Commercial files
+   * end the last `TS|..|` line with a trailing CRLF). Default false to preserve the
+   * existing golden fixtures that have no trailing newline.
+   */
+  trailingLineEnding?: boolean;
+  /**
    * Input is a single flat sheet (one row per consumer), not one sheet per
    * segment. Names the sheet + the 1-based label/data rows. When set, the reader
    * maps each data row to a single body record using `body[0]`'s field labels.
+   *
+   * `memberIdField`, when set, names a body-record field whose sheet value is
+   * REPLACED at assembly time by the file-level `meta.memberId` (the CRIF-assigned
+   * member ID). Real CRIF Consumer output stamps the bureau member ID into every
+   * account record's member-code field, not the raw member ID the accountant typed.
+   *
+   * `headerCells` maps sheet cell addresses to FileMeta keys (e.g. the accountant
+   * fills the short name / password in the form's header rows). A non-blank cell
+   * OVERRIDES the matching CLI flag. NOTE: `memberId` is deliberately NOT mappable
+   * here — the output member id is the CRIF-assigned id supplied via the flag, not
+   * the raw member id typed in the sheet.
    */
-  flatInput?: { sheet: string; labelRow: number; firstDataRow: number };
+  flatInput?: {
+    sheet: string;
+    labelRow: number;
+    firstDataRow: number;
+    memberIdField?: string;
+    headerCells?: Record<string, 'reportingDate' | 'creationDate' | 'password' | 'memberName' | 'memberShortName'>;
+  };
+  /**
+   * Flat input that explodes ONE source row into MANY segment records (real-world
+   * Commercial "Master Sheet": one borrower row -> BS/AS/RS/CR/... segments).
+   * `columns` maps source spreadsheet column letters (A, B, ...) to stable keys;
+   * `explode` turns one such keyed row into the borrower's segment seeds. When set,
+   * this supersedes `flatInput`'s single-record mapping.
+   */
+  flatExplode?: {
+    sheet: string;
+    /** 1-based first row containing borrower data (header rows above are skipped). */
+    firstDataRow: number;
+    /** Source column-letter -> stable input key (e.g. { A: 'borrowerName', B: 'pan' }). */
+    columns: Record<string, string>;
+    /** Map one keyed source row to the borrower's segment records. */
+    explode: (input: Record<string, FieldValue>, ctx: FlatExplodeContext) => SegmentSeed[];
+    /**
+     * File-level header values the accountant fills in the sheet's top rows, by
+     * cell address -> FileMeta key (e.g. { B5: 'memberId', B6: 'reportingDate',
+     * B7: 'creationDate' }). When a cell is non-blank it OVERRIDES the CLI flag;
+     * blank cells fall back to the flag. Dates parsed as DDMMYYYY.
+     */
+    headerCells?: Record<string, 'memberId' | 'reportingDate' | 'creationDate' | 'password' | 'memberName'>;
+  };
+}
+
+/** One produced segment record from a flat-explode mapping. */
+export interface SegmentSeed {
+  tag: string;
+  flag: number;
+  values: TypedRow;
+  /** Issues raised while mapping (e.g. an unmatched lookup), surfaced in the report. */
+  issues?: Array<{ fieldKey: string; message: string }>;
+}
+
+/** Context handed to a flat-explode mapper (lookups read from auxiliary sheets, etc.). */
+export interface FlatExplodeContext {
+  /** 1-based source row number, for error reporting. */
+  rowNumber: number;
+  /** Auxiliary lookup tables keyed by name (e.g. "creditType": text -> code). */
+  lookups: Record<string, Map<string, string>>;
 }
 
 export interface FileMeta {

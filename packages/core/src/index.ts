@@ -6,4 +6,5 @@ export { readWorkbook } from './input/workbook-reader.js';
 export { groupByBorrower } from './input/grouper.js';
 export { validate } from './validation/validator.js';
 export { toBuffer } from './output/file-writer.js';
+export { writeReport } from './output/report-writer.js';
 export { FORMATS, getFormat, listFormats } from './formats/index.js';

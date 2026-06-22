@@ -152,7 +152,7 @@ const TRLR: SegmentSpec = {
 
 export const consumerUcrf12: FormatSpec = {
   id: 'consumer-ucrf12',
-  label: 'Consumer UCRF-12 V3.73',
+  label: 'Consumer UCRF-12 (Template)',
   version: '3.73',
   outputExtension: '.txt',
   physicalLayout: 'one-line-per-record',

@@ -51,6 +51,7 @@ async function handleConvert(req: import('node:http').IncomingMessage, res: impo
     reportingDate?: string; // DDMMYYYY
     creationDate?: string;
     allowWarnings?: boolean;
+    report?: boolean; // also build the multi-sheet workbook report
     // exactly one of these:
     filePath?: string; // server-side path (folder mode)
     fileBase64?: string; // uploaded bytes (drag-drop mode)
@@ -69,7 +70,10 @@ async function handleConvert(req: import('node:http').IncomingMessage, res: impo
     creationDate: parseDate(payload.creationDate),
   };
 
-  const result = await convert(buf, format, meta, { allowWarnings: payload.allowWarnings });
+  const result = await convert(buf, format, meta, {
+    allowWarnings: payload.allowWarnings,
+    report: payload.report,
+  });
   return json(res, 200, {
     ok: result.report.ok,
     counts: result.counts,
@@ -77,6 +81,7 @@ async function handleConvert(req: import('node:http').IncomingMessage, res: impo
     extension: format.outputExtension,
     // base64 so the browser can offer a download
     outputBase64: result.output ? result.output.toString('base64') : null,
+    reportBase64: result.reportWorkbook ? result.reportWorkbook.toString('base64') : null,
   });
 }
 

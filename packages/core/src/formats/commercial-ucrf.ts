@@ -320,7 +320,7 @@ const TS: SegmentSpec = {
 
 export const commercialUcrf: FormatSpec = {
   id: 'commercial-ucrf',
-  label: 'Commercial UCRF V3.9',
+  label: 'Commercial UCRF (Template)',
   version: '3.9',
   outputExtension: '.txt',
   physicalLayout: 'one-line-per-record',
