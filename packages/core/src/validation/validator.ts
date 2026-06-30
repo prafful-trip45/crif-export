@@ -12,6 +12,27 @@ export function validate(format: FormatSpec, borrowers: Borrower[]): ValidationR
   const report = new ValidationReport();
   const specByTag = new Map(format.body.map((s) => [s.tag, s] as const));
 
+  // Empty-input guard: a workbook that yields no borrower data (wrong file, wrong
+  // sheet, or an empty sheet) would otherwise emit a header-only file with NO
+  // errors — something a user could unknowingly submit to the bureau. Treat zero
+  // records as a blocking error rather than a silent empty submission.
+  const totalSegments = borrowers.reduce((n, b) => n + b.segments.length, 0);
+  if (borrowers.length === 0 || totalSegments === 0) {
+    report.add({
+      severity: 'error',
+      sheet: '',
+      acNo: '',
+      rowNumber: 0,
+      fieldKey: '',
+      rule: 'empty-input',
+      message:
+        'No records found in the input. Check that the data is on the expected ' +
+        'sheet with the correct column headers — nothing was read.',
+      value: undefined,
+    });
+    return report;
+  }
+
   for (const borrower of borrowers) {
     const tagCounts = new Map<string, number>();
     for (const seg of borrower.segments) {

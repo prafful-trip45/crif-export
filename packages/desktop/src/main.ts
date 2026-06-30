@@ -42,8 +42,13 @@ let folderPath: string | null = null;
 // The reference output file the user uploads in Validator mode.
 let refBytes: ArrayBuffer | null = null;
 let refName: string | null = null;
-// Set true only when the backend version gate returns `upgrade-required`.
+// Set true only when a full-screen gate (login / upgrade) is active.
 let blocked = false;
+// Connectivity is treated as a SOFT gate: instead of a modal, losing the
+// connection just disables the Generate button. Defaults to true (assume online)
+// so the app is usable immediately; the real connection is verified by the
+// heartbeat when the window gains focus.
+let online = true;
 
 // ---- form persistence ------------------------------------------------------
 const PERSIST = ['format', 'memberId', 'memberName', 'reportingDate', 'creationDate'];
@@ -119,6 +124,7 @@ function init() {
 
   PERSIST.concat(['report']).forEach((id) => $(id).addEventListener('change', saveForm));
   ['memberId', 'format'].forEach((id) => $(id).addEventListener('input', refreshGo));
+  wireDatePickers();
 
   document.querySelectorAll('.tab').forEach(
     (t) =>
@@ -149,10 +155,11 @@ function init() {
   void evaluateGate();
 }
 
-// ---- auth + connectivity gate (FAIL-CLOSED: mandatory internet) ------------
-// The app refuses to run offline or in the background: the Generate button stays
-// blocked and a modal is shown until a live, authenticated, current session is
-// confirmed online while the window is in the foreground.
+// ---- auth + connectivity gate --------------------------------------------
+// Full-screen modals are reserved for LOGIN and UPGRADE only. Connectivity is a
+// SOFT gate: when offline / the server is unreachable, we simply disable the
+// Generate button (see `online` + refreshGo) instead of flashing a modal on every
+// focus change. The app does NOT block when backgrounded.
 type GateReason = 'ok' | 'login' | 'connection' | 'upgrade';
 let gateTimer: number | undefined;
 let evaluating = false;
@@ -189,18 +196,26 @@ async function evaluateGate(force = false) {
       applyGate('login');
       return;
     }
-    // Mandatory internet + foreground — never run offline or backgrounded.
-    if (document.hidden || !navigator.onLine) {
-      applyGate('connection');
+    // Offline: soft-gate (disable Generate), no modal. Stay on the current view.
+    if (!navigator.onLine) {
+      online = false;
+      applyGate('ok');
       return;
     }
     const version = await getAppVersion();
     const hb = await heartbeat(version);
-    if (hb.status === 'ok') applyGate('ok');
-    else if (hb.status === 'upgrade-required')
+    if (hb.status === 'ok') {
+      online = true;
+      applyGate('ok');
+    } else if (hb.status === 'upgrade-required') {
       applyGate('upgrade', { currentVersion: version, latestVersion: hb.latestVersion, downloadUrl: hb.downloadUrl });
-    else if (hb.status === 'session-revoked' || hb.status === 'unauthenticated') applyGate('login');
-    else applyGate('connection'); // 'unreachable' → FAIL CLOSED until back online
+    } else if (hb.status === 'session-revoked' || hb.status === 'unauthenticated') {
+      applyGate('login');
+    } else {
+      // 'unreachable' — soft-gate (disable Generate), no modal; retry on next focus/tick.
+      online = false;
+      applyGate('ok');
+    }
   } finally {
     evaluating = false;
   }
@@ -209,10 +224,17 @@ async function evaluateGate(force = false) {
 function startGateMonitor() {
   if (!serverConfigured()) return;
   window.addEventListener('online', () => void evaluateGate());
-  window.addEventListener('offline', () => applyGate('connection'));
-  // Page Visibility: backgrounding/minimising re-gates; returning re-verifies.
-  document.addEventListener('visibilitychange', () => void evaluateGate());
+  // Offline: just disable the button (soft gate), no modal.
+  window.addEventListener('offline', () => {
+    online = false;
+    refreshGo();
+  });
+  // Re-verify the connection only when the window REGAINS focus (not on blur),
+  // so backgrounding the app never flashes a popup.
   window.addEventListener('focus', () => void evaluateGate());
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) void evaluateGate();
+  });
   if (gateTimer === undefined) gateTimer = window.setInterval(() => void evaluateGate(), 30000);
 }
 
@@ -231,12 +253,19 @@ async function onLoginSubmit() {
   }
   const btn = $('loginSubmit') as HTMLButtonElement;
   btn.disabled = true;
+  btn.classList.add('loading');
+  btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>Signing in…';
   try {
     const version = await getAppVersion();
     const r = await authLogin(username, password, version);
     if (r.status === 'ok') {
+      // Login already confirmed auth + version server-side, so dismiss the overlay
+      // directly. (Don't await a second evaluateGate() — its heartbeat round-trip
+      // can be slow or coalesced behind the `evaluating` flag, leaving the button
+      // stuck on "Signing in…" and the overlay up.)
       ($('loginPass') as HTMLInputElement).value = '';
-      await evaluateGate();
+      online = true;
+      applyGate('ok');
     } else if (r.status === 'upgrade-required') {
       applyGate('upgrade', { currentVersion: version, latestVersion: r.latestVersion, downloadUrl: r.downloadUrl });
     } else if (r.status === 'company-suspended') {
@@ -248,6 +277,8 @@ async function onLoginSubmit() {
     }
   } finally {
     btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.textContent = 'Sign in';
   }
 }
 
@@ -391,13 +422,72 @@ function setRef(bytes: ArrayBuffer, name: string) {
 function refreshGo() {
   const hasInput = mode === 'file' ? !!pickedBytes : !!val('folderFile');
   const ready = val('memberId').trim() && hasInput && (appMode !== 'validate' || !!refBytes);
-  ($('go') as HTMLButtonElement).disabled = blocked || !ready;
+  const go = $('go') as HTMLButtonElement;
+  go.disabled = blocked || !online || !ready;
+  // Soft connection gate: explain why the button is disabled (no modal).
+  go.title = !online ? 'No internet connection — reconnect to generate.' : '';
 }
 
 function toDdmmyyyy(s: string): string | undefined {
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((s || '').trim());
   if (!m) return undefined;
   return m[1]!.padStart(2, '0') + m[2]!.padStart(2, '0') + m[3];
+}
+
+/** "DD/MM/YYYY" -> "YYYY-MM-DD" (native date input value), or '' if unparseable. */
+function toIsoDate(s: string): string {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((s || '').trim());
+  if (!m) return '';
+  return `${m[3]}-${m[2]!.padStart(2, '0')}-${m[1]!.padStart(2, '0')}`;
+}
+
+/** "YYYY-MM-DD" (native date input value) -> "DD/MM/YYYY". */
+function fromIsoDate(s: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((s || '').trim());
+  if (!m) return '';
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+/**
+ * Wire a calendar button + native <input type="date"> to a DD/MM/YYYY text input.
+ * The text field stays the source of truth (typing still works); the picker just
+ * writes a formatted date back into it. `showPicker()` opens the OS calendar.
+ */
+function wireDatePicker(textId: string, btnId: string, nativeId: string): void {
+  const text = $(textId) as HTMLInputElement;
+  const btn = $(btnId) as HTMLButtonElement;
+  const native = $(nativeId) as HTMLInputElement;
+  if (!text || !btn || !native) return;
+
+  const openPicker = () => {
+    native.value = toIsoDate(text.value); // seed from whatever's typed
+    // showPicker() is the modern API; fall back to focus+click for older shells.
+    if (typeof native.showPicker === 'function') {
+      try {
+        native.showPicker();
+        return;
+      } catch {
+        /* fall through to the click fallback below */
+      }
+    }
+    native.focus();
+    native.click();
+  };
+
+  btn.addEventListener('click', openPicker);
+  native.addEventListener('change', () => {
+    const formatted = fromIsoDate(native.value);
+    if (!formatted) return;
+    text.value = formatted;
+    // Notify the rest of the app (persistence on 'change', gating on 'input').
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+    text.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
+function wireDatePickers(): void {
+  wireDatePicker('reportingDate', 'reportingDatePick', 'reportingDateNative');
+  wireDatePicker('creationDate', 'creationDatePick', 'creationDateNative');
 }
 
 async function onGenerate() {

@@ -51,6 +51,15 @@ jobs:
         with:
           workspaces: packages/desktop/src-tauri
 
+      # The desktop app imports the shared engine from packages/core/src via
+      # relative paths, and that code imports `exceljs`. Vite/Rollup resolves
+      # those bare imports from the core source location, so `exceljs` must exist
+      # in an ancestor node_modules of packages/core — i.e. the repo ROOT. Install
+      # there too, not just in packages/desktop, or the build fails with
+      # "Rollup failed to resolve import 'exceljs'".
+      - name: Install root deps (shared core engine)
+        run: npm install
+
       - name: Install frontend deps
         working-directory: packages/desktop
         run: npm install

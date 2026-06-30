@@ -116,8 +116,11 @@ export async function readFlatExplodeWorkbook(
 
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as ArrayBuffer);
-  const ws = findSheet(wb, sheet);
-  if (!ws) throw new Error(`Input sheet "${sheet}" not found`);
+  // The named tab ("Master Sheet") is a hint, not a hard requirement: accountants
+  // routinely rename it, leave the default "Sheet1", or add extra tabs. Find the
+  // Master Sheet by CONTENT (which sheet's header row holds the expected fields)
+  // when the name doesn't match, rather than failing or guessing the first tab.
+  const ws = resolveFlatExplodeSheet(wb, format.flatExplode!);
 
   const lookups = { creditType: readCreditTypeLookup(wb) };
 
@@ -342,6 +345,104 @@ function resolveSheet(wb: ExcelJS.Workbook, name: string): ExcelJS.Worksheet {
   const fallback = wb.worksheets[0];
   if (!fallback) throw new Error(`Input sheet "${name}" not found and the workbook has no sheets`);
   return fallback;
+}
+
+/**
+ * Count how many of the format's expected header labels appear in a given row,
+ * using the same fold/prefix matching the column resolver uses ("Account Status
+ * 1. Open 2. Closed…" still matches the "Account Status" label). Returns 0 for a
+ * row that holds none of them — i.e. not a data-header row.
+ */
+function scoreHeaderRow(ws: ExcelJS.Worksheet, row: number, labels: string[]): number {
+  const fold = (s: string): string => normalize(s).replace(/\s*\/\s*/g, '/');
+  const hdr = ws.getRow(row);
+  const cells: string[] = [];
+  for (let c = 1; c <= ws.columnCount; c++) {
+    const t = fold(String(cellRaw(hdr.getCell(c)) ?? ''));
+    if (t) cells.push(t);
+  }
+  let hits = 0;
+  for (const label of labels) {
+    const k = fold(label);
+    if (cells.some((t) => t === k || t.startsWith(k))) hits++;
+  }
+  return hits;
+}
+
+/**
+ * Best header-label match for a sheet, scanning the top rows rather than trusting
+ * a single configured row number: an accountant's file may push the header down
+ * (extra title rows) or pull it up. Returns the highest hit count found in the
+ * first `maxScan` rows — that's how well this sheet matches the expected fields.
+ */
+function bestHeaderScore(ws: ExcelJS.Worksheet, labels: string[], maxScan = 25): number {
+  const last = Math.min(ws.rowCount, maxScan);
+  let best = 0;
+  for (let r = 1; r <= last; r++) {
+    const hits = scoreHeaderRow(ws, r, labels);
+    if (hits > best) best = hits;
+  }
+  return best;
+}
+
+/**
+ * First worksheet that has any rows; falls back to the very first sheet. Callers
+ * must pass a non-empty array (guarded upstream), so `sheets[0]` is defined.
+ */
+function firstNonEmptySheet(sheets: ExcelJS.Worksheet[]): ExcelJS.Worksheet {
+  return sheets.find((w) => w.rowCount > 0) ?? sheets[0]!;
+}
+
+/**
+ * Resolve the input sheet for a flat-EXPLODE workbook (e.g. the commercial
+ * "Master Sheet" or the consumer "Data Submission Form"). The tab NAME is just a
+ * hint — accountants rename it or leave the default "Sheet1", and a workbook may
+ * carry extra tabs (a "Credit Type Code" lookup, notes, a cover). Strategy:
+ *   1. If a tab literally named `spec.sheet` exists, use it (keeps the canonical
+ *      output byte-identical to the golden fixtures).
+ *   2. If the format identifies columns by HEADER TEXT (`columnHeaders`), scan
+ *      every sheet and pick the one whose header row best matches those labels —
+ *      that sheet IS the data sheet, regardless of tab name or header-row offset.
+ *      If none matches enough fields, throw a clear error naming the tabs seen.
+ *   3. If the format identifies columns by FIXED LETTER only (no `columnHeaders`,
+ *      e.g. the consumer TLV profile), there is no header text to match against,
+ *      so fall back to the first non-empty sheet (matching the single-record
+ *      reader's behaviour) rather than failing.
+ */
+function resolveFlatExplodeSheet(
+  wb: ExcelJS.Workbook,
+  spec: NonNullable<FormatSpec['flatExplode']>,
+): ExcelJS.Worksheet {
+  const named = findSheet(wb, spec.sheet);
+  if (named) return named;
+
+  const sheets = wb.worksheets;
+  if (sheets.length === 0) {
+    throw new Error(`Input sheet "${spec.sheet}" not found and the workbook has no sheets`);
+  }
+
+  // Letter-mapped formats have no header text to match — fall back to first sheet.
+  const labels = Object.keys(spec.columnHeaders ?? {});
+  if (labels.length === 0) return firstNonEmptySheet(sheets);
+
+  // Header-text formats: pick the sheet whose rows best match the expected labels.
+  // Require at least a few hits to rule out an unrelated tab (lookup/notes/cover)
+  // while tolerating sheets that omit a few optional columns.
+  const MIN_HITS = Math.min(3, labels.length);
+  let best: { ws: ExcelJS.Worksheet; hits: number } | undefined;
+  for (const ws of sheets) {
+    const hits = bestHeaderScore(ws, labels);
+    if (!best || hits > best.hits) best = { ws, hits };
+  }
+  if (best && best.hits >= MIN_HITS) return best.ws;
+
+  const seen = sheets.map((w) => `"${w.name}"`).join(', ');
+  throw new Error(
+    `Input sheet "${spec.sheet}" not found, and none of the workbook's sheets ` +
+      `(${seen}) contain the expected "${spec.sheet}" columns ` +
+      `(looked for fields like ${labels.slice(0, 3).map((l) => `"${l}"`).join(', ')}). ` +
+      `Rename the data tab to "${spec.sheet}" or check the header row.`,
+  );
 }
 
 /**

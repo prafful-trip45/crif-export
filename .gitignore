@@ -6,3 +6,8 @@ out/
 .vite/
 training-references/
 brochure/
+
+# Secrets — never commit. db.txt holds live DB credentials.
+db.txt
+*.env
+.env*
