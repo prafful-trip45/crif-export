@@ -29,7 +29,7 @@ export async function convert(
   meta: FileMeta,
   options: ConvertOptions = {},
 ): Promise<ConvertResult> {
-  const rows = await readWorkbook(buffer, format);
+  const rows = await readWorkbook(buffer, format, meta);
   const borrowers = groupByBorrower(rows);
   const report = validate(format, borrowers);
   const counts = computeCounts(format, borrowers);

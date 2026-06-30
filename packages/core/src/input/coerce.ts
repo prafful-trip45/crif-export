@@ -16,7 +16,16 @@ export function coerceCell(spec: FieldSpec, raw: RawCell): FieldValue {
     case 'date-ddmmyyyy':
     case 'date-ddmmccyy': {
       if (raw instanceof Date) return raw;
-      if (typeof raw === 'number') return excelSerialToDate(raw);
+      if (typeof raw === 'number') {
+        // A real Excel date serial is a small number (~40000-50000 for the 2020s).
+        // Accountants often type the date AS DIGITS (15012026 = 15-Jan-2026), which
+        // arrives as a large number — parse those as DDMMYYYY, not as a serial.
+        if (raw >= 1_000_000) {
+          const crif = parseCrifDate(String(Math.trunc(raw)).padStart(8, '0'));
+          if (crif) return crif;
+        }
+        return excelSerialToDate(raw);
+      }
       const s = String(raw).trim();
       // Accept already-formatted DDMMYYYY, or common date strings.
       const crif = parseCrifDate(s);

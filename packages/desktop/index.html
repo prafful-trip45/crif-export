@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CRIF Export</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="apphead">
+        <h1>CRIF Export</h1>
+        <span class="badge" id="offlineBadge" title="All processing happens on this machine. Your data never leaves the device.">● Offline · on-device</span>
+      </header>
+      <p class="sub">Convert customer data in Excel → CRIF Highmark bureau submission files.</p>
+
+      <div class="tabs apptabs" id="appTabs">
+        <div class="tab active" data-app="convert">Convert</div>
+        <div class="tab" data-app="validate">Validator</div>
+      </div>
+
+      <p class="sub validate-only hidden" id="validateIntro">
+        Upload your input <code>.xlsx</code> <strong>and</strong> the output file you already have
+        (a filed submission or a CRIF reference). The app re-generates from the input and
+        <strong>automatically compares</strong> the two — byte for byte — to confirm they match.
+      </p>
+
+      <div class="card">
+        <label>Bureau format / portal <span class="hint">(which submission you are filing)</span></label>
+        <select id="format"></select>
+
+        <div class="row">
+          <div>
+            <label>Member / MFI / NBF ID</label>
+            <input type="text" id="memberId" placeholder="e.g. NBF1111111" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+          </div>
+          <div>
+            <label>Reporting / cycle date <span class="hint">DD/MM/YYYY</span></label>
+            <input type="text" id="reportingDate" placeholder="30/04/2024" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+          </div>
+          <div>
+            <label>Creation date <span class="hint">DD/MM/YYYY</span></label>
+            <input type="text" id="creationDate" placeholder="30/04/2024" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+          </div>
+        </div>
+        <div class="row">
+          <div id="memberNameWrap">
+            <label>Member name <span class="hint">(MFI)</span></label>
+            <input type="text" id="memberName" placeholder="ABC Microfinance" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+          </div>
+        </div>
+        <label class="hint checkline">
+          <input type="checkbox" id="report" />
+          Also generate the multi-sheet workbook report (.xlsx — one sheet per segment + sorting)
+        </label>
+        <p class="hint">For flat-sheet formats you may leave Member&nbsp;ID &amp; dates blank if filled in the sheet's header cells — the sheet overrides these.</p>
+      </div>
+
+      <div class="card">
+        <label>Input source</label>
+        <div class="tabs">
+          <div class="tab active" data-mode="file">Pick a file</div>
+          <div class="tab" data-mode="folder">Pick from a folder</div>
+        </div>
+
+        <div id="modeFile">
+          <div class="drop" id="drop">
+            <strong>Choose an <code>.xlsx</code> file</strong>
+            <span class="hint">click to browse, or drop a file here</span>
+          </div>
+          <input type="file" id="file" accept=".xlsx" class="hidden" />
+        </div>
+
+        <div id="modeFolder" class="hidden">
+          <button class="secondary" id="chooseFolder" type="button">Choose folder…</button>
+          <div class="hint" id="folderPath">No folder chosen</div>
+          <label>File <span class="hint">(picked from the folder)</span></label>
+          <select id="folderFile"><option value="">— choose a folder above —</option></select>
+        </div>
+      </div>
+
+      <div class="card validate-only hidden" id="referenceCard">
+        <label>Output file to validate against
+          <span class="hint">(the existing bureau file — .txt / .CDF — or a CRIF reference)</span>
+        </label>
+        <div class="drop" id="refDrop">
+          <strong>Choose the output file</strong>
+          <span class="hint">click to browse, or drop the generated/reference file here</span>
+        </div>
+        <input type="file" id="refFile" class="hidden" />
+        <label class="hint checkline">
+          <input type="checkbox" id="ignoreEol" />
+          Ignore line-ending differences (CRLF vs LF) — compare content only
+        </label>
+      </div>
+
+      <button class="go" id="go" disabled>Generate submission file</button>
+      <div class="result" id="result"></div>
+    </div>
+
+    <div id="loginOverlay" class="overlay hidden">
+      <div class="overlay-card">
+        <div class="overlay-icon">🔒</div>
+        <h2>Sign in</h2>
+        <p>Use the credentials provided by your administrator at onboarding.</p>
+        <input type="text" id="loginUser" placeholder="Username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" />
+        <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password" />
+        <div id="loginError" class="login-error"></div>
+        <button class="dl" id="loginSubmit">Sign in</button>
+      </div>
+    </div>
+
+    <div id="connectionOverlay" class="overlay hidden">
+      <div class="overlay-card">
+        <div class="overlay-icon">📡</div>
+        <h2>Internet connection required</h2>
+        <p>CRIF Export must stay online and in the foreground to run. Reconnect to continue — nothing you've entered is lost.</p>
+        <button class="dl" id="connectionRetry">Retry</button>
+      </div>
+    </div>
+
+    <div id="upgradeOverlay" class="overlay hidden">
+      <div class="overlay-card">
+        <div class="overlay-icon" id="overlayIcon">⤓</div>
+        <h2 id="overlayTitle">Update required</h2>
+        <p id="upgradeMsg">A newer version of CRIF Export is required to continue.</p>
+        <a id="upgradeLink" class="dl" href="#" target="_blank" rel="noopener">Download the latest version</a>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

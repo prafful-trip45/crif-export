@@ -23,8 +23,11 @@ export const PAGE_HTML = /* html */ `<!doctype html>
   .hint { color:var(--muted); font-weight:400; font-size:12px; }
   select, input[type=text], input[type=password] { width:100%; padding:9px 11px; background:#0d1117; border:1px solid var(--line); border-radius:8px; color:var(--ink); }
   .row { display:flex; gap:14px; } .row > div { flex:1; }
-  .drop { border:2px dashed var(--line); border-radius:10px; padding:30px; text-align:center; color:var(--muted); cursor:pointer; }
+  .drop { border:2px dashed var(--line); border-radius:10px; padding:30px; text-align:center; color:var(--muted); cursor:pointer; transition:border-color .12s,color .12s,background .12s; }
   .drop.over { border-color:var(--accent); color:var(--ink); }
+  .drop.has-file { border-style:solid; border-color:var(--ok); color:var(--ink); background:rgba(46,160,67,.08); }
+  .drop .fn { font-weight:700; color:var(--ink); word-break:break-all; }
+  .drop .swap { color:var(--accent); font-size:12px; }
   button.go { margin-top:18px; width:100%; padding:12px; font-weight:700; font-size:15px; background:var(--accent); color:#fff; border:0; border-radius:9px; cursor:pointer; }
   button.go:disabled { opacity:.5; cursor:not-allowed; }
   .hidden { display:none; }
@@ -51,31 +54,23 @@ export const PAGE_HTML = /* html */ `<!doctype html>
     <div class="row">
       <div>
         <label>Member / MFI / NBF ID</label>
-        <input type="text" id="memberId" placeholder="e.g. NBF1111111"/>
+        <input type="text" id="memberId" placeholder="e.g. NBF1111111" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/>
       </div>
       <div>
         <label>Reporting / cycle date <span class="hint">DD/MM/YYYY</span></label>
-        <input type="text" id="reportingDate" placeholder="30/04/2024"/>
+        <input type="text" id="reportingDate" placeholder="30/04/2024" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/>
       </div>
       <div>
         <label>Creation date <span class="hint">DD/MM/YYYY</span></label>
-        <input type="text" id="creationDate" placeholder="30/04/2024"/>
+        <input type="text" id="creationDate" placeholder="30/04/2024" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/>
       </div>
     </div>
     <div class="row">
       <div id="memberNameWrap">
         <label>Member name <span class="hint">(MFI)</span></label>
-        <input type="text" id="memberName" placeholder="ABC Microfinance"/>
-      </div>
-      <div id="passwordWrap">
-        <label>Reporting password <span class="hint">(if required)</span></label>
-        <input type="password" id="password"/>
+        <input type="text" id="memberName" placeholder="ABC Microfinance" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/>
       </div>
     </div>
-    <label class="hint" style="font-weight:400;margin-top:14px;">
-      <input type="checkbox" id="report" style="width:auto;vertical-align:middle;"/>
-      Also generate the multi-sheet workbook report (.xlsx — one sheet per segment + sorting)
-    </label>
     <p class="hint">For flat-sheet formats you may leave Member ID &amp; dates blank if filled in the sheet's header cells — the sheet overrides these.</p>
   </div>
 
@@ -94,23 +89,57 @@ export const PAGE_HTML = /* html */ `<!doctype html>
 const $ = (id) => document.getElementById(id);
 let uploadB64 = null, uploadName = null;
 
+// Persist the user's choices across reloads (selected format + the typed fields).
+const PERSIST = ['format','memberId','memberName','reportingDate','creationDate'];
+const STORE = 'crif-export-form';
+function saveForm() {
+  const data = {}; PERSIST.forEach(id => { data[id] = $(id).value; });
+  try { localStorage.setItem(STORE, JSON.stringify(data)); } catch(e){}
+}
+function loadForm() {
+  let data; try { data = JSON.parse(localStorage.getItem(STORE) || '{}'); } catch(e){ data = {}; }
+  PERSIST.forEach(id => { if (data[id] != null && id !== 'format') $(id).value = data[id]; });
+  return data;
+}
+
+// Parse a fetch Response as JSON, but surface a readable error when the server
+// returns HTML/text (auth page, 5xx, Cloudflare error) instead of "Unexpected token '<'".
+async function safeJson(res) {
+  const text = await res.text();
+  try { return JSON.parse(text); }
+  catch (e) {
+    const snippet = text.replace(/<[^>]*>/g,' ').replace(/\\s+/g,' ').trim().slice(0,160);
+    throw new Error('Server returned a non-JSON response (HTTP '+res.status+'). '+(snippet||'The request may have failed or timed out.'));
+  }
+}
+
 async function init() {
-  const { formats } = await (await fetch('/api/formats')).json();
+  const { formats } = await safeJson(await fetch('/api/formats'));
   $('format').innerHTML = formats.map(f => '<option value="'+f.id+'">'+f.label+'</option>').join('');
+  const saved = loadForm();
+  // Restore the selected format only if it still exists in the list.
+  if (saved.format && formats.some(f => f.id === saved.format)) $('format').value = saved.format;
+  PERSIST.forEach(id => $(id).addEventListener('change', saveForm));
   refreshGo();
 }
 init();
 
 const drop = $('drop');
 drop.onclick = () => $('file').click();
+// Prevent the browser from navigating to a file dropped anywhere on the window.
+['dragover','drop'].forEach(e => window.addEventListener(e, ev => ev.preventDefault()));
 ['dragover','dragenter'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
-['dragleave','drop'].forEach(e => drop.addEventListener(e, () => drop.classList.remove('over')));
-drop.addEventListener('drop', ev => { ev.preventDefault(); handleFile(ev.dataTransfer.files[0]); });
+['dragleave','dragend'].forEach(e => drop.addEventListener(e, () => drop.classList.remove('over')));
+drop.addEventListener('drop', ev => { ev.preventDefault(); drop.classList.remove('over'); handleFile(ev.dataTransfer.files[0]); });
 $('file').addEventListener('change', ev => handleFile(ev.target.files[0]));
 
 function handleFile(f) {
   if (!f) return;
-  uploadName = f.name; $('fileName').textContent = 'Selected: ' + f.name;
+  uploadName = f.name;
+  // Reflect the selection in the drop zone itself (not just the line below it).
+  drop.classList.add('has-file');
+  drop.innerHTML = '<div class="fn">✓ ' + f.name + '</div><div class="swap">click to choose a different file</div>';
+  $('fileName').textContent = '';
   const reader = new FileReader();
   reader.onload = () => { uploadB64 = reader.result.split(',')[1]; refreshGo(); };
   reader.readAsDataURL(f);
@@ -127,14 +156,12 @@ $('go').onclick = async () => {
     formatId: $('format').value,
     memberId: $('memberId').value.trim(),
     memberName: $('memberName').value.trim() || undefined,
-    password: $('password').value || undefined,
     reportingDate: toDdmmyyyy($('reportingDate').value),
     creationDate: toDdmmyyyy($('creationDate').value) || toDdmmyyyy($('reportingDate').value),
-    report: $('report').checked,
     fileBase64: uploadB64,
   };
   try {
-    const r = await (await fetch('/api/convert',{method:'POST',body:JSON.stringify(payload)})).json();
+    const r = await safeJson(await fetch('/api/convert',{method:'POST',body:JSON.stringify(payload)}));
     render(r);
   } catch(e){ $('result').innerHTML = '<span class="pill err">ERROR</span> '+e.message; }
   refreshGo();

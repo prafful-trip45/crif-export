@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Vidyasetu — CRIF Export · Pricing Quotation</title>
+<style>
+  :root {
+    --indigo: #4F46E5;
+    --indigo-dark: #3730A3;
+    --indigo-soft: #EEF0FF;
+    --green: #16A34A;
+    --green-soft: #ECFDF3;
+    --ink: #1A1A2E;
+    --muted: #6B7280;
+    --line: #E5E7EB;
+    --bg: #FFFFFF;
+    --amber: #B45309;
+    --amber-soft: #FFF7ED;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    color: var(--ink);
+    background: var(--bg);
+    font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 11px;
+    line-height: 1.5;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  @page { size: A4; margin: 13mm; }
+
+  .page-break { page-break-before: auto; }
+  .avoid-break { page-break-inside: avoid; }
+
+  h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -0.01em; }
+
+  .section-title {
+    font-size: 17px;
+    color: var(--ink);
+    margin: 0 0 12px;
+    padding-bottom: 7px;
+    border-bottom: 2px solid var(--indigo);
+    display: inline-block;
+  }
+  .section-wrap { margin: 16px 0; }
+  .section-wrap:first-child { margin-top: 0; }
+
+  /* ---------- COVER ---------- */
+  .cover {
+    background: linear-gradient(135deg, #4F46E5 0%, #6D28D9 55%, #7C3AED 100%);
+    color: #fff;
+    border-radius: 18px;
+    padding: 40px 38px 34px;
+    position: relative;
+    overflow: hidden;
+  }
+  .cover::after {
+    content: "";
+    position: absolute;
+    right: -90px; top: -90px;
+    width: 280px; height: 280px;
+    background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 70%);
+    border-radius: 50%;
+  }
+  .wordmark {
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+  }
+  .logo-dot {
+    width: 30px; height: 30px;
+    border-radius: 9px;
+    background: rgba(255,255,255,0.92);
+    color: var(--indigo);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: 800;
+  }
+  .product-eyebrow {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin-top: 18px;
+    color: rgba(255,255,255,0.85);
+  }
+  .tagline {
+    font-size: 15px;
+    font-weight: 600;
+    margin-top: 6px;
+    max-width: 500px;
+    line-height: 1.55;
+    color: rgba(255,255,255,0.95);
+  }
+  .tagline .ai { color: #FDE68A; }
+  .cover-meta {
+    margin-top: 24px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 11px;
+  }
+  .pill {
+    background: rgba(255,255,255,0.16);
+    border: 1px solid rgba(255,255,255,0.28);
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .prepared {
+    margin-top: 22px;
+    font-size: 12px;
+    color: rgba(255,255,255,0.85);
+  }
+  .prepared b { color: #fff; font-size: 15px; }
+
+  .lead {
+    font-size: 12px;
+    color: #374151;
+    margin: 22px 2px 0;
+    line-height: 1.65;
+    max-width: 720px;
+  }
+  .lead b { color: var(--indigo-dark); }
+
+  /* ---------- HEADLINE PRICE ---------- */
+  .price-hero {
+    display: flex;
+    gap: 18px;
+    margin-top: 14px;
+    align-items: stretch;
+  }
+  .price-card {
+    flex: 1.2;
+    border: 1.5px solid #C7C9F5;
+    border-top: 5px solid var(--indigo);
+    border-radius: 16px;
+    padding: 24px 24px 20px;
+    background: #fff;
+    box-shadow: 0 8px 26px rgba(79,70,229,0.14);
+    position: relative;
+  }
+  .ribbon {
+    position: absolute;
+    top: 16px; right: 16px;
+    background: var(--indigo);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    padding: 4px 10px;
+    border-radius: 999px;
+    text-transform: uppercase;
+  }
+  .price-card .eyebrow {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--indigo);
+  }
+  .price-card .vibe { font-size: 13px; color: var(--muted); font-style: italic; margin-top: 2px; }
+  .price { margin: 16px 0 2px; }
+  .price .rupee { font-size: 26px; font-weight: 800; vertical-align: top; }
+  .price .num { font-size: 50px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
+  .price .per { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .annual { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .price-card .best { font-size: 11px; margin-top: 14px; color: #374151; }
+  .price-card .best b { color: var(--ink); }
+
+  .value-card {
+    flex: 1;
+    background: var(--green-soft);
+    border: 1px solid #BBF7D0;
+    border-radius: 16px;
+    padding: 20px 20px;
+  }
+  .value-card .vt { font-size: 12px; font-weight: 800; color: var(--green); letter-spacing: 0.04em; text-transform: uppercase; }
+  .value-card ul { margin: 12px 0 0; padding-left: 18px; }
+  .value-card li { font-size: 11.5px; color: #374151; margin-bottom: 8px; line-height: 1.45; }
+  .value-card li b { color: var(--ink); }
+
+  .offer-strip {
+    margin-top: 14px;
+    background: var(--amber-soft);
+    border: 1px solid #FED7AA;
+    color: var(--amber);
+    border-radius: 10px;
+    padding: 9px 13px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  /* ---------- FEATURE GRIDS ---------- */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px 18px;
+  }
+  .feat {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    padding: 6px 0;
+    border-bottom: 1px solid #F1F1F5;
+  }
+  .feat .ico { font-size: 14px; line-height: 1.3; }
+  .feat .ft { font-size: 11px; }
+  .feat .ft b { display: block; color: var(--ink); }
+  .feat .ft span { color: var(--muted); font-size: 10px; }
+
+  .block-label {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 4px 11px;
+    border-radius: 999px;
+    margin-bottom: 12px;
+  }
+  .block-label.core { background: var(--indigo-soft); color: var(--indigo); }
+
+  /* ---------- TABLES ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  thead th {
+    background: var(--indigo);
+    color: #fff;
+    font-weight: 700;
+    text-align: left;
+    padding: 9px 12px;
+  }
+  thead th:not(:first-child) { text-align: center; }
+  tbody td { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  tbody td:not(:first-child) { text-align: center; }
+  tbody tr:nth-child(even) { background: #FAFAFE; }
+  tr, .train, .offer, .feat { page-break-inside: avoid; }
+  thead { display: table-header-group; }
+  .check { color: var(--green); font-weight: 800; }
+  .price-cell { font-weight: 700; color: var(--indigo-dark); }
+
+  /* ---------- HOW IT WORKS ---------- */
+  .flow { display: flex; gap: 10px; margin-top: 4px; }
+  .step {
+    flex: 1;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 13px 14px;
+    background: #fff;
+  }
+  .step .sn {
+    width: 22px; height: 22px; border-radius: 7px;
+    background: var(--indigo); color: #fff;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800;
+  }
+  .step .st { font-size: 12px; font-weight: 800; margin-top: 8px; }
+  .step .sd { font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+
+  /* ---------- NOTE / OFFERS ---------- */
+  .note {
+    background: var(--indigo-soft);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 11px;
+    color: var(--indigo-dark);
+    margin-top: 12px;
+  }
+  .offers { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .offer {
+    background: var(--green-soft);
+    border: 1px solid #BBF7D0;
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+  .offer b { color: var(--green); font-size: 12px; }
+  .offer p { margin: 4px 0 0; font-size: 11px; color: #374151; }
+
+  /* ---------- FOOTER ---------- */
+  .footer {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 2px solid var(--indigo);
+    text-align: center;
+  }
+  .footer .ft-tag { font-size: 13px; font-weight: 700; color: var(--indigo-dark); font-style: italic; }
+  .footer .ft-sub { font-size: 10px; color: var(--muted); margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<!-- ============ PAGE 1 ============ -->
+
+  <div class="cover avoid-break">
+    <div class="wordmark"><span class="logo-dot">वि</span> Vidyasetu</div>
+    <div class="product-eyebrow">CRIF Export</div>
+    <div class="tagline">Turn your Excel loan books into <span class="ai">CRIF Highmark</span>–ready bureau submission files — in seconds, error-free.</div>
+    <div class="cover-meta">
+      <span class="pill">🏢 Commercial UCRF</span>
+      <span class="pill">👥 MFI CDF V2.0</span>
+      <span class="pill">🧾 Consumer UCRF-12</span>
+      <span class="pill">✅ Byte-exact &amp; validated</span>
+    </div>
+    <div class="prepared">Pricing quotation prepared for<br><b>Your Organisation</b></div>
+  </div>
+
+  <p class="lead">
+    Credit-bureau reporting eats hours every cycle — staff hand-stitch Excel into the bureau's
+    rigid layout, a single misplaced character gets the whole file rejected, and the fix means
+    debugging spreadsheet formulas instead of running the business. <b>Vidyasetu CRIF Export</b>
+    takes the workbooks your accountants already maintain and produces <b>upload-ready CRIF
+    Highmark files</b> — Commercial, MFI and Consumer — with a plain-language validation report
+    that tells your team exactly what to fix, in the source sheet, before anything is filed.
+  </p>
+
+  <div class="section-wrap">
+    <h2 class="section-title">Your Quotation</h2>
+    <div class="price-hero">
+
+      <div class="price-card avoid-break">
+        <div class="ribbon">★ All-Inclusive</div>
+        <div class="eyebrow">🔵 CRIF Export — Annual Bundle</div>
+        <div class="vibe">Unlimited reporting for your operation</div>
+        <div class="price">
+          <span class="rupee">₹</span><span class="num">1,20,000</span>
+          <span class="per"> / year</span>
+        </div>
+        <div class="annual">≈ ₹10,000 / month · billed annually · all portals included</div>
+        <div class="best"><b>Covers:</b> all your reporting entities across every portal, on a
+          weekly (or more frequent) cycle — generation, validation, and the accountant-style
+          workbook report, with no per-file charges.</div>
+      </div>
+
+      <div class="value-card avoid-break">
+        <div class="vt">What's included</div>
+        <ul>
+          <li><b>All three bureau formats</b> — Commercial, MFI &amp; Consumer, one tool</li>
+          <li><b>All portals &amp; entities</b> — every reporting unit, one flat price</li>
+          <li><b>Unlimited generations</b> — weekly cycles or ad-hoc, no metering</li>
+          <li><b>Runs on your own machine</b> — desktop tool + local portal, no cloud bill</li>
+          <li><b>Validation report included</b> — staff fix data in the source, not the file</li>
+        </ul>
+      </div>
+
+    </div>
+    <div class="offer-strip">💡 Flat annual price — no per-file or per-report charges, no surprise overages within your normal reporting volume.</div>
+  </div>
+
+  <div class="section-wrap">
+    <h2 class="section-title">How It Works</h2>
+    <div class="flow">
+      <div class="step">
+        <div class="sn">1</div>
+        <div class="st">Bring your Excel</div>
+        <div class="sd">Use the workbooks your accountants already maintain — or our ready-to-fill templates.</div>
+      </div>
+      <div class="step">
+        <div class="sn">2</div>
+        <div class="st">Generate</div>
+        <div class="sd">One engine assembles the exact bureau layout — header, per-borrower segments, computed trailers.</div>
+      </div>
+      <div class="step">
+        <div class="sn">3</div>
+        <div class="st">Validate</div>
+        <div class="sd">A clear report flags every issue so staff fix the source data before filing.</div>
+      </div>
+      <div class="step">
+        <div class="sn">4</div>
+        <div class="st">Upload</div>
+        <div class="sd">Download the byte-exact file (and workbook report) and upload to the CRIF portal.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-wrap">
+    <h2 class="section-title">What You Get</h2>
+    <span class="block-label core">✅ Included in your annual bundle</span>
+    <div class="grid">
+      <div class="feat"><span class="ico">🏢</span><span class="ft"><b>Commercial UCRF</b><span>Business / corporate loans → pipe-delimited bureau file</span></span></div>
+      <div class="feat"><span class="ico">👥</span><span class="ft"><b>MFI CDF V2.0</b><span>Microfinance loans → fixed-width + segment file</span></span></div>
+      <div class="feat"><span class="ico">🧾</span><span class="ft"><b>Consumer UCRF-12</b><span>Retail / individual loans → coded-field file</span></span></div>
+      <div class="feat"><span class="ico">📥</span><span class="ft"><b>Works with your sheets</b><span>Real-world flat master sheets, not just rigid templates</span></span></div>
+      <div class="feat"><span class="ico">✅</span><span class="ft"><b>Byte-exact output</b><span>Validated against CRIF's own sample files</span></span></div>
+      <div class="feat"><span class="ico">🔎</span><span class="ft"><b>Validation report</b><span>Mandatory / format / enum / length checks, all at once</span></span></div>
+      <div class="feat"><span class="ico">📊</span><span class="ft"><b>Workbook report</b><span>Accountant-style multi-sheet working file per submission</span></span></div>
+      <div class="feat"><span class="ico">🌐</span><span class="ft"><b>Web portal</b><span>Pick format, drop a file, download the result — no install</span></span></div>
+      <div class="feat"><span class="ico">🔁</span><span class="ft"><b>Unlimited cycles</b><span>Weekly, monthly or ad-hoc — no per-file fees</span></span></div>
+      <div class="feat"><span class="ico">💻</span><span class="ft"><b>Runs on your machine</b><span>Desktop tool + local portal — no server to rent or run</span></span></div>
+      <div class="feat"><span class="ico">🔐</span><span class="ft"><b>Your data stays yours</b><span>Files generated for your upload — no third-party sharing</span></span></div>
+      <div class="feat"><span class="ico">🛠️</span><span class="ft"><b>Format upkeep</b><span>Spec changes from the bureau folded in over time</span></span></div>
+    </div>
+  </div>
+
+<!-- ============ PAGE 2 ============ -->
+
+  <div class="section-wrap page-break">
+    <h2 class="section-title">Why Vidyasetu CRIF Export</h2>
+    <table>
+      <thead><tr><th>Doing it manually / by spreadsheet</th><th>With Vidyasetu CRIF Export</th></tr></thead>
+      <tbody>
+        <tr><td style="text-align:left">Hours of hand-formatting per cycle</td><td>Seconds per file</td></tr>
+        <tr><td style="text-align:left">Files rejected for a single bad character</td><td>Byte-exact, bureau-validated output</td></tr>
+        <tr><td style="text-align:left">Errors found only after the bureau rejects</td><td>Caught up front, in a plain-language report</td></tr>
+        <tr><td style="text-align:left">Each format a separate manual effort</td><td>Commercial, MFI &amp; Consumer in one tool</td></tr>
+        <tr><td style="text-align:left">Knowledge locked in one person's spreadsheet</td><td>Repeatable, hosted, maintained for you</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section-wrap">
+    <h2 class="section-title">💰 Investment</h2>
+    <table>
+      <thead><tr><th>Item</th><th>Price</th></tr></thead>
+      <tbody>
+        <tr><td style="text-align:left"><b>CRIF Export — Annual Bundle</b> (all formats, all portals, unlimited generations, hosted)</td><td class="price-cell">₹1,20,000 / year</td></tr>
+        <tr><td style="text-align:left">Onboarding &amp; format mapping</td><td class="price-cell">Included</td></tr>
+        <tr><td style="text-align:left">Setup on your machines &amp; updates</td><td class="price-cell">Included</td></tr>
+        <tr><td style="text-align:left">New / custom bureau format (optional)</td><td class="price-cell">Quoted per scope</td></tr>
+        <tr><td style="text-align:left">Hosted portal URL (optional)</td><td class="price-cell">Included on request</td></tr>
+      </tbody>
+    </table>
+    <div class="note">💬 <b>Why it pays for itself:</b> one rejected bureau submission can cost a full
+      reporting cycle in rework and a compliance risk. A flat ₹10,000/month removes both — your
+      team files clean, on time, every cycle, across every entity and portal, with no per-file maths.</div>
+  </div>
+
+  <div class="section-wrap">
+    <h2 class="section-title">🎁 Launch Offers</h2>
+    <div class="offers">
+      <div class="offer"><b>Free Onboarding</b><p>Format mapping + setup for your sheets included at no extra cost.</p></div>
+      <div class="offer"><b>Annual Lock</b><p>Lock today's price for Year 1 — no mid-term increases.</p></div>
+      <div class="offer"><b>Pilot Run</b><p>We generate your first live submission set with you, hands-on.</p></div>
+      <div class="offer"><b>Format Add-on Credit</b><p>First custom format spec at 50% off within Year 1.</p></div>
+    </div>
+  </div>
+
+  <div class="footer avoid-break">
+    <div class="ft-tag">Excel in. Bureau-ready out. Validated, byte-exact, every cycle.</div>
+    <div class="ft-sub">Vidyasetu · CRIF Export · Commercial · MFI · Consumer · Prepared for Your Organisation</div>
+  </div>
+
+</body>
+</html>

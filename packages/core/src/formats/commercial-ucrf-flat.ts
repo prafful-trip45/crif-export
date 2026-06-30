@@ -273,6 +273,48 @@ const COLUMNS: Record<string, string> = {
   AD: 'relatedContact',
 };
 
+/**
+ * Header-driven mapping (label prefix -> stable key). Master Sheets vary in column
+ * POSITION between accountant templates (e.g. a single vs double "Asset
+ * Classification" column shifts everything after it, and the related-person block
+ * lands one column over), but the header LABELS are stable. Matching by header text
+ * makes one profile read both layouts. Header cells carry an embedded legend after
+ * the label, so the reader matches by normalized prefix (longest match wins, which
+ * is the legend-bearing column that actually holds the data).
+ */
+const COLUMN_HEADERS: Record<string, string> = {
+  "Borrower's Name": 'borrowerName',
+  "Borrower's PAN": 'pan',
+  'Borrowers Legal Constitution': 'legalConstitution',
+  'Business Category': 'businessCategory',
+  'Business/ Industry Type': 'businessIndustryType',
+  "Borrower's Address with PIN Code": 'address',
+  "Borrower's Contact No.": 'contactNo',
+  "Borrower's Account Number": 'accountNumber',
+  'Facility / Loan Activation / Sanction Date': 'sanctionDate',
+  'Sanctioned Amount/ Notional Amount of Contract': 'sanctionedAmount',
+  'Credit Type': 'creditType',
+  'Repayment Frequency': 'repaymentFrequency',
+  'Drawing Power': 'drawingPower',
+  'Current Balance / Limit Utilized': 'currentBalance',
+  'Asset Classification': 'assetClassification',
+  'Amount Overdue / Limit Overdue': 'amountOverdue',
+  'Account Status': 'accountStatus',
+  'Wilful Default Status': 'wilfulDefault',
+  'Suit Filed Status': 'suitFiledStatus',
+  'Suit Reference Number': 'suitReferenceNumber',
+  'Suit Amount in Rupees': 'suitAmount',
+  'Date of Suit': 'dateOfSuit',
+  // Related person
+  'Relationship Type': 'relationshipType',
+  "Related Person's Name": 'relatedName',
+  "Related Person's Gender": 'relatedGender',
+  "Related Person's Date of Birth": 'relatedDob',
+  "Related Person's PAN": 'relatedPan',
+  "Related Person's Address with PIN Code": 'relatedAddress',
+  "Related Person's Contact No": 'relatedContact',
+};
+
 function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): SegmentSeed[] {
   const seeds: SegmentSeed[] = [];
   const issues: SegmentSeed['issues'] = [];
@@ -467,7 +509,9 @@ export const commercialUcrfFlat: FormatSpec = {
   flatExplode: {
     sheet: 'Master Sheet',
     firstDataRow: 11,
+    headerRow: 10,
     columns: COLUMNS,
+    columnHeaders: COLUMN_HEADERS,
     explode,
     // Accountant fills these top-of-sheet cells; a non-blank value overrides the
     // matching CLI flag. A5/A6/A7 hold the labels; B5/B6/B7 the values.

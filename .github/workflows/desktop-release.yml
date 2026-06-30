@@ -1,0 +1,80 @@
+name: desktop-release
+
+# Builds the CRIF Export desktop app for macOS (Apple Silicon + Intel) and
+# Windows. A Windows .exe/.msi cannot be cross-compiled from macOS, so each
+# target builds on its own native runner.
+#
+# Trigger by pushing a tag like `desktop-v0.1.0`, or run manually from the
+# Actions tab. On a tag push the installers are attached to a draft GitHub
+# Release; manual runs upload them as workflow artifacts.
+
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop/src-tauri
+
+      - name: Install frontend deps
+        working-directory: packages/desktop
+        run: npm install
+
+      - name: Build app (tauri)
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: packages/desktop
+          args: ${{ matrix.args }}
+          # On a tag push, create/append to a draft release. Empty tagName on
+          # workflow_dispatch keeps it as artifacts only.
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: "CRIF Export ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+
+      - name: Upload installers (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: crif-export-${{ matrix.target }}
+          path: |
+            packages/desktop/src-tauri/target/**/release/bundle/**/*.dmg
+            packages/desktop/src-tauri/target/**/release/bundle/**/*.app
+            packages/desktop/src-tauri/target/**/release/bundle/**/*.msi
+            packages/desktop/src-tauri/target/**/release/bundle/**/*.exe
+          if-no-files-found: ignore

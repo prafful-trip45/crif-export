@@ -39,7 +39,7 @@ const RECORD: SegmentSpec = {
     c('gender', 'Gender', { type: 'enum', enum: GENDER, mandatory: true }), // PN/08 (C)
     c('pan', 'Income Tax ID Number'), // ID/01 (D)
     c('mobile', 'Telephone No.Mobile'), // PT/01 (P)
-    c('addressLine1', 'Address Line 1', { mandatory: true }), // PA/01 (X)
+    c('addressLine1', 'Address Line 1', { mandatory: true, aliases: ['Address 1'] }), // PA/01 (X)
     c('stateCode', 'State Code 1'), // PA/06 (Y)
     c('pinCode', 'PIN Code 1'), // PA/07 (Z)
     c('addressCategory', 'Address Category 1'), // PA/08 (AA)

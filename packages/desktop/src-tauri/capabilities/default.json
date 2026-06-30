@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Native open/save dialogs plus read/write access to the workbook the user explicitly picks and the location they choose to save to.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "fs:default",
+    { "identifier": "fs:allow-read-file", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-write-file", "allow": [{ "path": "**" }] },
+    { "identifier": "fs:allow-read-dir", "allow": [{ "path": "**" }] }
+  ]
+}

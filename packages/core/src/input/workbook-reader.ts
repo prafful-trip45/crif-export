@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import type { FieldValue, FlatExplodeContext, FormatSpec, SegmentSpec } from '../core/types.js';
+import type { FieldSpec, FieldValue, FileMeta, FlatExplodeContext, FormatSpec, SegmentSpec } from '../core/types.js';
 import { coerceCell, type RawCell } from './coerce.js';
 import type { SegmentRow } from './model.js';
 
@@ -24,9 +24,10 @@ const FLAG_HEADERS = ['flag'];
 export async function readWorkbook(
   buffer: Buffer | ArrayBuffer,
   format: FormatSpec,
+  meta?: FileMeta,
 ): Promise<SegmentRow[]> {
   // Real-world flat "Master Sheet": one borrower row explodes into many segments.
-  if (format.flatExplode) return readFlatExplodeWorkbook(buffer, format);
+  if (format.flatExplode) return readFlatExplodeWorkbook(buffer, format, meta);
   // Flat-form formats (one row per consumer) use a dedicated reader.
   if (format.flatInput) return readFlatWorkbook(buffer, format);
 
@@ -47,24 +48,36 @@ export async function readWorkbook(
  * Read a single flat sheet (real CRIF "Data Submission Form"): a label row maps
  * columns to the single body record's field labels, and each subsequent row is
  * one consumer record. Each row becomes its own borrower (acNo = row number).
+ *
+ * The configured `sheet` / `labelRow` are HINTS, not hard requirements: real
+ * accountant files routinely rename the tab ("Sheet1") and shift the form up or
+ * down a few rows. So we (1) fall back to the workbook's single/first sheet when
+ * the named tab is absent, and (2) auto-detect the label row by scanning for the
+ * row whose cells match the most body-field labels. `firstDataRow` follows from
+ * the detected label row. This keeps the canonical reference file working while
+ * tolerating renamed/reshuffled variants.
  */
 export async function readFlatWorkbook(
   buffer: Buffer | ArrayBuffer,
   format: FormatSpec,
 ): Promise<SegmentRow[]> {
-  const { sheet, labelRow, firstDataRow } = format.flatInput!;
+  const { sheet, labelRow } = format.flatInput!;
   const seg = format.body[0]!;
 
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as ArrayBuffer);
-  const ws = findSheet(wb, sheet);
-  if (!ws) throw new Error(`Input sheet "${sheet}" not found`);
+  const ws = resolveSheet(wb, sheet);
 
-  // Map each label cell -> the field whose label matches.
+  // Locate the column-label row by best match against the body field labels,
+  // preferring the configured `labelRow` when it ties. The data starts the row
+  // after the labels.
+  const detectedLabelRow = detectLabelRow(ws, seg, labelRow);
+  const firstDataRow = detectedLabelRow + 1;
+
+  // Map each label cell -> the field whose label/key/alias matches.
   const fieldByCol = new Map<number, string>();
-  ws.getRow(labelRow).eachCell({ includeEmpty: false }, (cell, col) => {
-    const header = normalize(String(cellRaw(cell) ?? ''));
-    const field = seg.fields.find((f) => normalize(f.label ?? '') === header || normalize(f.key) === header);
+  ws.getRow(detectedLabelRow).eachCell({ includeEmpty: false }, (cell, col) => {
+    const field = matchField(seg.fields, normalize(String(cellRaw(cell) ?? '')));
     if (field) fieldByCol.set(col, field.key);
   });
 
@@ -97,8 +110,9 @@ export async function readFlatWorkbook(
 export async function readFlatExplodeWorkbook(
   buffer: Buffer | ArrayBuffer,
   format: FormatSpec,
+  meta?: FileMeta,
 ): Promise<SegmentRow[]> {
-  const { sheet, firstDataRow, columns, explode } = format.flatExplode!;
+  const { sheet, firstDataRow, columns, columnHeaders, headerRow, explode } = format.flatExplode!;
 
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as ArrayBuffer);
@@ -107,8 +121,47 @@ export async function readFlatExplodeWorkbook(
 
   const lookups = { creditType: readCreditTypeLookup(wb) };
 
+  // Resolve the column->key mapping. Header-driven mapping (match the header row
+  // text) takes precedence so one profile adapts to shifted layouts; fixed
+  // letter columns are the fallback for keys not covered by a header match.
   const colToKey = new Map<number, string>();
   for (const [letter, key] of Object.entries(columns)) colToKey.set(colLetterToNumber(letter), key);
+  if (columnHeaders) {
+    // Header cells often carry an embedded legend after the label
+    // ("Account Status 1. Open 2. Closed ..."), so match by normalized PREFIX:
+    // the first column whose header starts with the (normalized) key text wins.
+    // Fold a header for matching: normalize() + drop spaces around "/" so
+    // "Business / Industry Type" and "Business/ Industry Type" compare equal.
+    const foldHeader = (s: string): string => normalize(s).replace(/\s*\/\s*/g, '/');
+    const hdrRow = ws.getRow(headerRow ?? firstDataRow - 1);
+    const normHeaders: Array<{ col: number; text: string }> = [];
+    for (let c = 1; c <= ws.columnCount; c++) {
+      const text = foldHeader(String(cellRaw(hdrRow.getCell(c)) ?? ''));
+      if (text) normHeaders.push({ col: c, text });
+    }
+    // Prefer the LEGEND-BEARING column (longest header that starts with the key):
+    // some sheets split a field into a bare-label column (often blank) plus a
+    // legend-bearing column that actually holds the data — match the latter.
+    const findHeaderCol = (key: string): number | undefined => {
+      const k = foldHeader(key);
+      let best: { col: number; len: number } | undefined;
+      for (const h of normHeaders) {
+        if (h.text === k || h.text.startsWith(k)) {
+          if (!best || h.text.length > best.len) best = { col: h.col, len: h.text.length };
+        }
+      }
+      return best?.col;
+    };
+    // Header keys override any letter mapping: clear letter-mapped cols first so a
+    // shifted layout can't leave a stale (wrong-column) binding behind.
+    for (const key of Object.values(columnHeaders)) {
+      for (const [col, k] of colToKey) if (k === key) colToKey.delete(col);
+    }
+    for (const [text, key] of Object.entries(columnHeaders)) {
+      const col = findHeaderCol(text);
+      if (col !== undefined) colToKey.set(col, key);
+    }
+  }
 
   const rows: SegmentRow[] = [];
   for (let r = firstDataRow; r <= ws.rowCount; r++) {
@@ -123,7 +176,7 @@ export async function readFlatExplodeWorkbook(
     }
     if (!any) continue; // skip blank rows
 
-    const ctx: FlatExplodeContext = { rowNumber: r, lookups };
+    const ctx: FlatExplodeContext = { rowNumber: r, lookups, meta };
     const seeds = explode(input, ctx);
     for (const seed of seeds) {
       rows.push({
@@ -144,6 +197,12 @@ export async function readFlatExplodeWorkbook(
  * Read the file-level header overrides an accountant fills in the flat sheet's top
  * rows (e.g. Member ID / Reporting Date / Creation Date), per `flatExplode.headerCells`.
  * Returns a partial FileMeta; blank cells are omitted so the CLI flag wins.
+ *
+ * The configured `headerCells` are fixed addresses (correct for the canonical
+ * layout). When a form is shifted those addresses come up blank, so for the flat
+ * single-record path we additionally detect the TUDF header block by label and
+ * fill in any keys the fixed addresses didn't supply. The sheet name is a hint:
+ * we fall back to the single/first sheet just like the data reader.
  */
 export async function readFlatHeaderOverrides(
   buffer: Buffer | ArrayBuffer,
@@ -151,25 +210,85 @@ export async function readFlatHeaderOverrides(
 ): Promise<Partial<Record<string, FieldValue>>> {
   const cells = format.flatExplode?.headerCells ?? format.flatInput?.headerCells;
   const sheet = format.flatExplode?.sheet ?? format.flatInput?.sheet;
-  if (!cells || !sheet) return {};
+  if (!sheet) return {};
 
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as ArrayBuffer);
-  const ws = findSheet(wb, sheet);
+  const ws = format.flatInput ? resolveSheet(wb, sheet) : findSheet(wb, sheet);
   if (!ws) return {};
 
   const out: Record<string, FieldValue> = {};
-  for (const [addr, key] of Object.entries(cells)) {
-    const raw = cellRaw(ws.getCell(addr));
-    const v = normalizeRaw(raw);
-    if (v === undefined || String(v).trim() === '') continue;
+  const set = (key: string, v: FieldValue): void => {
+    if (v === undefined || String(v).trim() === '') return;
     if (key === 'reportingDate' || key === 'creationDate') {
-      const d = coerceCell({ key, type: 'date-ddmmyyyy', mandatory: false }, v as RawCell);
-      out[key] = d;
+      out[key] = coerceCell({ key, type: 'date-ddmmyyyy', mandatory: false }, v as RawCell);
     } else {
       out[key] = String(v).trim();
     }
+  };
+
+  // Configured fixed-address cells take precedence (canonical layout).
+  for (const [addr, key] of Object.entries(cells ?? {})) set(key, normalizeRaw(cellRaw(ws.getCell(addr))));
+
+  // Flat path: backfill any header keys the fixed addresses missed by locating the
+  // form's TUDF header block (label row + value row directly below) by its known
+  // CRIF column labels. Handles forms shifted left/up where the configured cell
+  // addresses no longer line up.
+  if (format.flatInput) {
+    for (const [key, v] of Object.entries(detectFlatHeaderValues(ws))) {
+      if (!(key in out)) set(key, v);
+    }
   }
+
+  return out;
+}
+
+/**
+ * The CRIF "Data Submission Form" TUDF header block uses these fixed column
+ * labels (normalized) -> FileMeta key. We deliberately do NOT backfill memberId:
+ * the output member id is the CRIF-assigned id supplied via the flag, not the raw
+ * id typed in the sheet (see flatInput docs in types.ts).
+ */
+const FLAT_HEADER_LABEL_TO_META: Record<string, string> = {
+  'short name': 'memberShortName',
+  'date reported': 'reportingDate',
+  'reporting password': 'password',
+};
+
+/**
+ * Detect the TUDF header value row (the row directly under the row carrying the
+ * known CRIF header labels) and pull file-level header values from it by matched
+ * column. Returns FileMeta-keyed values; only short name / reporting date /
+ * password are mapped.
+ */
+function detectFlatHeaderValues(ws: ExcelJS.Worksheet): Record<string, FieldValue> {
+  const labels = Object.keys(FLAT_HEADER_LABEL_TO_META);
+  // Find the row matching the most known header labels (scan only near the top).
+  let best = { row: 0, score: 0 };
+  const lastRow = Math.min(ws.rowCount, 50);
+  for (let r = 1; r <= lastRow; r++) {
+    let score = 0;
+    const seen = new Set<string>();
+    ws.getRow(r).eachCell({ includeEmpty: false }, (cell) => {
+      const h = normalize(String(cellRaw(cell) ?? ''));
+      if (labels.includes(h) && !seen.has(h)) {
+        seen.add(h);
+        score++;
+      }
+    });
+    if (score > best.score) best = { row: r, score };
+  }
+  if (best.score === 0) return {};
+
+  const metaByCol = new Map<number, string>();
+  ws.getRow(best.row).eachCell({ includeEmpty: false }, (cell, col) => {
+    const metaKey = FLAT_HEADER_LABEL_TO_META[normalize(String(cellRaw(cell) ?? ''))];
+    if (metaKey) metaByCol.set(col, metaKey);
+  });
+
+  const valueRow = ws.getRow(best.row + 1);
+  const out: Record<string, FieldValue> = {};
+  for (const [col, metaKey] of metaByCol) out[metaKey] = normalizeRaw(cellRaw(valueRow.getCell(col)));
   return out;
 }
 
@@ -210,6 +329,51 @@ function findSheet(wb: ExcelJS.Workbook, name: string): ExcelJS.Worksheet | unde
   return wb.worksheets.find((w) => w.name.toLowerCase() === lc);
 }
 
+/**
+ * Resolve the input sheet for a flat single-record workbook. The named tab is a
+ * hint: when it isn't present, fall back to the workbook's only sheet (or its
+ * first sheet) rather than failing — accountants routinely leave the default
+ * "Sheet1" name. Throws only when the workbook has no sheets at all, and the
+ * message lists what was actually present.
+ */
+function resolveSheet(wb: ExcelJS.Workbook, name: string): ExcelJS.Worksheet {
+  const named = findSheet(wb, name);
+  if (named) return named;
+  const fallback = wb.worksheets[0];
+  if (!fallback) throw new Error(`Input sheet "${name}" not found and the workbook has no sheets`);
+  return fallback;
+}
+
+/**
+ * Find the 1-based row that holds the column labels by scoring each row on how
+ * many cells match a body field's label/key. The configured `preferredRow` wins
+ * ties (and is required to be a positive match), so the canonical layout is
+ * unchanged while shifted forms are still located. Falls back to `preferredRow`
+ * when nothing matches (the downstream mapping will then surface empty output).
+ */
+function detectLabelRow(ws: ExcelJS.Worksheet, seg: SegmentSpec, preferredRow: number): number {
+  let best = { row: preferredRow, score: -1 };
+  const lastRow = Math.min(ws.rowCount, 200); // labels live near the top; cap the scan
+  for (let r = 1; r <= lastRow; r++) {
+    const score = countLabelMatches(ws.getRow(r), seg);
+    // Strictly-greater keeps the FIRST best row; bias toward preferredRow on ties.
+    if (score > best.score || (score === best.score && r === preferredRow)) best = { row: r, score };
+  }
+  return best.score > 0 ? best.row : preferredRow;
+}
+
+/** How many of `seg`'s fields are named by some cell in `row` (label/key/alias). */
+function countLabelMatches(row: ExcelJS.Row, seg: SegmentSpec): number {
+  const matched = new Set<string>();
+  row.eachCell({ includeEmpty: false }, (cell) => {
+    const header = normalize(String(cellRaw(cell) ?? ''));
+    if (!header) return;
+    const field = matchField(seg.fields, header);
+    if (field) matched.add(field.key);
+  });
+  return matched.size;
+}
+
 function readSheet(ws: ExcelJS.Worksheet, seg: SegmentSpec): SegmentRow[] {
   const headerRow = ws.getRow(1);
   const headerMap = new Map<number, string>(); // colIndex -> normalized header
@@ -230,9 +394,7 @@ function readSheet(ws: ExcelJS.Worksheet, seg: SegmentSpec): SegmentRow[] {
       flagCol = col;
       continue;
     }
-    const field = seg.fields.find(
-      (f) => normalize(f.label ?? '') === header || normalize(f.key) === header,
-    );
+    const field = matchField(seg.fields, header);
     if (field) fieldCol.set(field.key, col);
   }
 
@@ -291,4 +453,17 @@ function isBlankRow(row: ExcelJS.Row, headerMap: Map<number, string>): boolean {
 
 function normalize(s: string): string {
   return s.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[“”„‘’]/g, '');
+}
+
+/**
+ * Find the field a column header names: matches the field's `label`, `key`, or any
+ * `aliases` entry (all normalized). `header` must already be normalized.
+ */
+function matchField(fields: FieldSpec[], header: string): FieldSpec | undefined {
+  return fields.find(
+    (f) =>
+      normalize(f.label ?? '') === header ||
+      normalize(f.key) === header ||
+      (f.aliases ?? []).some((a) => normalize(a) === header),
+  );
 }

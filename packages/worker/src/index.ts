@@ -108,9 +108,14 @@ async function handleConvert(req: Request): Promise<Response> {
   };
 
   try {
+    // The multi-sheet .xlsx report uses ExcelJS's workbook WRITER, which hangs on
+    // the Workers runtime (the runtime then kills the request → 1101). The reader
+    // works, so conversion + the .txt download are fine — only the report is
+    // unavailable on the hosted portal. Never invoke it here; the local Node portal
+    // and the CLI still produce it.
     const result = await convert(ab, format, meta, {
       allowWarnings: payload.allowWarnings,
-      report: payload.report,
+      report: false,
     });
     return json({
       ok: result.report.ok,
@@ -118,7 +123,8 @@ async function handleConvert(req: Request): Promise<Response> {
       issues: result.report.issues,
       extension: format.outputExtension,
       outputBase64: result.output ? result.output.toString('base64') : null,
-      reportBase64: result.reportWorkbook ? result.reportWorkbook.toString('base64') : null,
+      reportBase64: null,
+      reportUnavailable: payload.report === true,
     });
   } catch (err) {
     return json({ error: (err as Error).message }, 500);

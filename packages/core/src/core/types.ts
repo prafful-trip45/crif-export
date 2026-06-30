@@ -29,6 +29,13 @@ export interface FieldSpec {
   key: string;
   /** Human-readable column header shown in generated templates / reports. */
   label?: string;
+  /**
+   * Alternate input-column headers that also map to this field. CRIF forms in the
+   * wild vary the wording of a column (e.g. "Address 1" vs "Address Line 1"), so
+   * the workbook reader matches a header against `label`, `key`, OR any alias
+   * (all normalized). Output/template generation still uses `label`.
+   */
+  aliases?: string[];
   /** 2-char field code — Consumer `coded-field` encoding only. */
   code?: string;
   type: FieldType;
@@ -92,6 +99,7 @@ export interface SegmentSpec {
 export type FormatId =
   | 'consumer-ucrf12'
   | 'consumer-ucrf12-flat'
+  | 'consumer-ucrf12-flat-tlv'
   | 'commercial-ucrf'
   | 'commercial-ucrf-flat'
   | 'mfi-cdf';
@@ -162,6 +170,18 @@ export interface FormatSpec {
     firstDataRow: number;
     /** Source column-letter -> stable input key (e.g. { A: 'borrowerName', B: 'pan' }). */
     columns: Record<string, string>;
+    /**
+     * Header-driven column mapping: header-cell TEXT -> stable input key. When set,
+     * columns are resolved by matching the `headerRow` text (case/whitespace-folded)
+     * rather than by fixed letters, so ONE profile adapts to Master Sheets whose
+     * columns are shifted but whose header labels are the same (e.g. a single vs
+     * double "Asset Classification" column cascading the related-person block). Keys
+     * here take precedence over `columns`; any key not found in the header row is
+     * left unmapped (blank), so the explode mapper must tolerate missing inputs.
+     */
+    columnHeaders?: Record<string, string>;
+    /** 1-based row holding the column header labels (defaults to firstDataRow - 1). */
+    headerRow?: number;
     /** Map one keyed source row to the borrower's segment records. */
     explode: (input: Record<string, FieldValue>, ctx: FlatExplodeContext) => SegmentSeed[];
     /**
@@ -170,7 +190,7 @@ export interface FormatSpec {
      * B7: 'creationDate' }). When a cell is non-blank it OVERRIDES the CLI flag;
      * blank cells fall back to the flag. Dates parsed as DDMMYYYY.
      */
-    headerCells?: Record<string, 'memberId' | 'reportingDate' | 'creationDate' | 'password' | 'memberName'>;
+    headerCells?: Record<string, 'memberId' | 'reportingDate' | 'creationDate' | 'password' | 'memberName' | 'memberShortName' | 'cycleId'>;
   };
 }
 
@@ -189,6 +209,12 @@ export interface FlatExplodeContext {
   rowNumber: number;
   /** Auxiliary lookup tables keyed by name (e.g. "creditType": text -> code). */
   lookups: Record<string, Map<string, string>>;
+  /**
+   * File-level metadata (CLI flags). Lets a mapper stamp the CRIF-assigned
+   * `meta.memberId` into a record (e.g. the consumer TL member-code field) rather
+   * than the raw id typed in the sheet.
+   */
+  meta?: FileMeta;
 }
 
 export interface FileMeta {
