@@ -28,10 +28,29 @@ function jsToTsResolve(): Plugin {
   };
 }
 
+/**
+ * Strip the `crossorigin` attribute Vite adds to the bundled <script>/<link>
+ * tags. In the packaged Tauri app, assets are served over the custom `tauri://`
+ * protocol, and a `crossorigin`-flagged request fails the WebView's CORS check —
+ * so the CSS and the entry module silently fail to load (the app renders as
+ * unstyled raw HTML and no JS runs). Harmless in the browser/dev server. See the
+ * Tauri + Vite asset-loading gotcha.
+ */
+function stripCrossorigin(): Plugin {
+  return {
+    name: 'crif-strip-crossorigin',
+    enforce: 'post',
+    transformIndexHtml(html) {
+      return html.replace(/\s+crossorigin\b(?:=(?:"[^"]*"|'[^']*'))?/g, '');
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     jsToTsResolve(),
+    stripCrossorigin(),
     // ExcelJS needs Node builtin MODULES (stream/zlib/util/events — xlsx is a
     // zip). Polyfill those. We deliberately DISABLE the per-file GLOBAL
     // injection (Buffer/process/global): the engine source lives outside this

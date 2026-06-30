@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CRIF Export</title>
+    <title>CIC - Text and TUDF converter</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
     <div class="wrap">
       <header class="apphead">
-        <h1>CRIF Export</h1>
+        <h1>CIC - Text and TUDF converter</h1>
         <span class="badge" id="offlineBadge" title="All processing happens on this machine. Your data never leaves the device.">● Offline · on-device</span>
       </header>
       <p class="sub">Convert customer data in Excel → CRIF Highmark bureau submission files.</p>
@@ -36,11 +36,23 @@
           </div>
           <div>
             <label>Reporting / cycle date <span class="hint">DD/MM/YYYY</span></label>
-            <input type="text" id="reportingDate" placeholder="30/04/2024" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+            <div class="datefield">
+              <input type="text" id="reportingDate" placeholder="30/04/2024" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+              <button type="button" class="date-btn" id="reportingDatePick" aria-label="Pick reporting date" title="Pick a date">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1Zm12 7H5v10h14V9Zm0-2V6H5v1h14Z"/></svg>
+              </button>
+              <input type="date" class="date-native" id="reportingDateNative" tabindex="-1" aria-hidden="true" />
+            </div>
           </div>
           <div>
             <label>Creation date <span class="hint">DD/MM/YYYY</span></label>
-            <input type="text" id="creationDate" placeholder="30/04/2024" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+            <div class="datefield">
+              <input type="text" id="creationDate" placeholder="30/04/2024" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+              <button type="button" class="date-btn" id="creationDatePick" aria-label="Pick creation date" title="Pick a date">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1Zm12 7H5v10h14V9Zm0-2V6H5v1h14Z"/></svg>
+              </button>
+              <input type="date" class="date-native" id="creationDateNative" tabindex="-1" aria-hidden="true" />
+            </div>
           </div>
         </div>
         <div class="row">
@@ -114,7 +126,7 @@
       <div class="overlay-card">
         <div class="overlay-icon">📡</div>
         <h2>Internet connection required</h2>
-        <p>CRIF Export must stay online and in the foreground to run. Reconnect to continue — nothing you've entered is lost.</p>
+        <p>CIC - Text and TUDF converter must stay online and in the foreground to run. Reconnect to continue — nothing you've entered is lost.</p>
         <button class="dl" id="connectionRetry">Retry</button>
       </div>
     </div>
@@ -123,7 +135,7 @@
       <div class="overlay-card">
         <div class="overlay-icon" id="overlayIcon">⤓</div>
         <h2 id="overlayTitle">Update required</h2>
-        <p id="upgradeMsg">A newer version of CRIF Export is required to continue.</p>
+        <p id="upgradeMsg">A newer version of CIC - Text and TUDF converter is required to continue.</p>
         <a id="upgradeLink" class="dl" href="#" target="_blank" rel="noopener">Download the latest version</a>
       </div>
     </div>

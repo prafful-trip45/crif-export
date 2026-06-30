@@ -99,7 +99,6 @@ export interface SegmentSpec {
 export type FormatId =
   | 'consumer-ucrf12'
   | 'consumer-ucrf12-flat'
-  | 'consumer-ucrf12-flat-tlv'
   | 'commercial-ucrf'
   | 'commercial-ucrf-flat'
   | 'mfi-cdf';

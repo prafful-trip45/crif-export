@@ -102,6 +102,47 @@ input[type="checkbox"] {
   width: auto;
   margin-top: 3px;
 }
+/* Date field: text input + calendar button that opens the native date picker. */
+.datefield {
+  position: relative;
+}
+.datefield > input[type="text"] {
+  padding-right: 38px; /* room for the calendar button */
+}
+.datefield .date-btn {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.datefield .date-btn:hover {
+  color: var(--accent);
+  background: rgba(79, 140, 255, 0.12);
+}
+/* The native <input type="date"> is only the picker surface — keep it invisible
+   but clickable beneath the button so the OS calendar anchors here. */
+.datefield .date-native {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 36px;
+  height: 100%;
+  opacity: 0;
+  border: 0;
+  padding: 0;
+  pointer-events: none; /* the button drives it; this just anchors the popup */
+}
 .row {
   display: flex;
   gap: 14px;
@@ -202,8 +243,12 @@ button.go:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Must win over later equal-specificity rules like `.overlay { display:flex }`
+   (defined further down). Without !important, an element with class
+   "overlay hidden" stays visible because `.overlay` comes later in source order —
+   which made the login/connection/upgrade overlays impossible to hide. */
 .hidden {
-  display: none;
+  display: none !important;
 }
 .result {
   margin-top: 16px;
@@ -329,6 +374,29 @@ code {
   cursor: pointer;
   font: inherit;
   font-weight: 700;
+}
+/* Loading state for the Sign in button: spinner + dimmed, non-interactive. */
+.overlay-card #loginSubmit.loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  opacity: 0.85;
+  cursor: progress;
+}
+.spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  flex: none;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .login-error {
   color: var(--err);

@@ -5,7 +5,8 @@ export type ValidationRule =
   | 'length'
   | 'cardinality'
   | 'date'
-  | 'lookup';
+  | 'lookup'
+  | 'empty-input';
 
 export type Severity = 'error' | 'warning';
 
