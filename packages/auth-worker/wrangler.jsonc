@@ -1,0 +1,41 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "crif-auth",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  // WebCrypto (SubtleCrypto) only — no nodejs_compat needed.
+  "observability": { "enabled": true },
+
+  // D1 holds the user table (provisioned accounts). Create with:
+  //   npx wrangler d1 create crif-auth
+  // then paste the returned database_id below.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "crif-auth",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
+  ],
+
+  // KV holds the ONE active session per user (key `sess:{userId}`). Create with:
+  //   npx wrangler kv namespace create SESSIONS
+  // then paste the returned id below.
+  "kv_namespaces": [
+    {
+      "binding": "SESSIONS",
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ],
+
+  "vars": {
+    "MIN_VERSION": "0.1.0",
+    "LATEST_VERSION": "0.1.1",
+    "DOWNLOAD_URL": "https://cic.vidyasetu.net/download",
+    "ACCESS_TTL_SECONDS": "900",
+    "REFRESH_TTL_SECONDS": "2592000"
+  }
+
+  // Secret (NOT in this file):  npx wrangler secret put JWT_SECRET
+  // A custom domain route (e.g. api.vidyasetu.net) is added the same way the
+  // conversion worker pins cic.vidyasetu.net.
+}
