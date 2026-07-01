@@ -214,6 +214,13 @@ export interface FlatExplodeContext {
    * than the raw id typed in the sheet.
    */
   meta?: FileMeta;
+  /**
+   * Every cell of the source row paired with its column header text, in column
+   * order. Lets a mapper handle REPEATED header groups the flat `input` map can't
+   * represent (e.g. up to 3 side-by-side guarantor blocks that share identical
+   * headers) via positional block detection. Header text is the raw sheet label.
+   */
+  rawCells?: Array<{ col: number; header: string; value: FieldValue }>;
 }
 
 export interface FileMeta {

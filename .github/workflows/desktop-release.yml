@@ -66,6 +66,12 @@ jobs:
 
       - name: Build app (tauri)
         uses: tauri-apps/tauri-action@v0
+        # The login gate is active only when VITE_LICENSE_SERVER_URL is baked in
+        # at build time (see packages/desktop/src/auth.ts). The local .env that
+        # holds it is gitignored, so CI must inject it from a repo secret — without
+        # this the shared installer opens with no login.
+        env:
+          VITE_LICENSE_SERVER_URL: ${{ secrets.VITE_LICENSE_SERVER_URL }}
         with:
           projectPath: packages/desktop
           args: ${{ matrix.args }}
