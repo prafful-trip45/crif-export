@@ -166,6 +166,17 @@ export async function readFlatExplodeWorkbook(
     }
   }
 
+  // Header row text (for positional block detection of repeated header groups,
+  // e.g. multiple guarantor blocks the flat `input` map can't represent).
+  const headerTexts = new Map<number, string>();
+  {
+    const hdrRow = ws.getRow(headerRow ?? firstDataRow - 1);
+    for (let c = 1; c <= ws.columnCount; c++) {
+      const text = String(cellRaw(hdrRow.getCell(c)) ?? '').trim();
+      if (text) headerTexts.set(c, text);
+    }
+  }
+
   const rows: SegmentRow[] = [];
   for (let r = firstDataRow; r <= ws.rowCount; r++) {
     const wsRow = ws.getRow(r);
@@ -179,7 +190,12 @@ export async function readFlatExplodeWorkbook(
     }
     if (!any) continue; // skip blank rows
 
-    const ctx: FlatExplodeContext = { rowNumber: r, lookups, meta };
+    const rawCells: Array<{ col: number; header: string; value: FieldValue }> = [];
+    for (let c = 1; c <= ws.columnCount; c++) {
+      rawCells.push({ col: c, header: headerTexts.get(c) ?? '', value: normalizeRaw(cellRaw(wsRow.getCell(c))) });
+    }
+
+    const ctx: FlatExplodeContext = { rowNumber: r, lookups, meta, rawCells };
     const seeds = explode(input, ctx);
     for (const seed of seeds) {
       rows.push({

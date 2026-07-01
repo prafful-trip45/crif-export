@@ -224,50 +224,54 @@ const CR: SegmentSpec = {
   ],
 };
 
+// GS token order is anchored to a POPULATED golden (38 tokens). It mirrors RS but
+// drops the related-person `relationship`/`businessEntityName`/one-id slots, so the
+// guarantor's name lands at token 7 and the address block at token 23. (Verify against
+// a populated GS line before changing — see the `crif-commercial-format` skill.)
 const GS: SegmentSpec = {
   tag: 'GS',
   encoding: 'pipe-delimited',
   flag: 5,
   cardinality: 'many',
   fields: [
-    tag('GS'),
-    opt('gsDuns', 'Guarantor DUNS Number'),
-    opt('gsRelatedType', 'Related Type'),
-    opt('gsBusinessCategory', 'Business Category'),
-    opt('gsBusinessIndustryType', 'Business / Industry Type'),
-    opt('gsNamePrefix', 'Individual Name Prefix'),
-    opt('gsFullName', 'Full Name'),
-    opt('gsGender', 'Gender'),
-    opt('gsCompanyRegNumber', 'Company Registration Number'),
-    date('gsDateOfIncorporation', 'Date of Incorporation'),
-    date('gsDateOfBirth', 'Date of Birth'),
-    opt('gsPan', 'PAN'),
-    opt('gsVoterId', 'Voter ID'),
-    opt('gsPassport', 'Passport Number'),
-    opt('gsDrivingLicence', 'Driving Licence ID'),
-    opt('gsUid', 'UID'),
-    opt('gsRationCard', 'Ration Card No'),
-    opt('gsAddressLine1', 'Address Line 1'),
-    opt('gsAddressLine2', 'Address Line 2'),
-    opt('gsAddressLine3', 'Address Line 3'),
-    opt('gsCity', 'City/Town'),
-    opt('gsDistrict', 'District'),
-    opt('gsStateCode', 'State/Union Territory'),
-    opt('gsPinCode', 'Pin Code'),
-    opt('gsCountry', 'Country'),
-    opt('gsMobile', 'Mobile Number(s)'),
-    opt('gsTelNumber', 'Telephone Number(s)'),
-    opt('gsTelAreaCode', 'Telephone Area Code'),
-    opt('gsFaxNumber', 'Fax Number(s)'),
-    opt('gsFaxAreaCode', 'Fax Area Code'),
-    opt('gsPercentControl', 'Percentage of Control'),
-    opt('gsCin', 'CIN'),
-    opt('gsDin', 'DIN'),
-    opt('gsTin', 'TIN'),
-    opt('gsServiceTax', 'Service Tax #'),
-    opt('gsOtherId', 'Other ID'),
-    opt('gsFiller', 'Filler'),
-    opt('gsFiller2', 'Filler'), // pad to golden 38-token width
+    tag('GS'), // 0
+    opt('gsDuns', 'Guarantor DUNS Number'), // 1
+    opt('gsRelatedType', 'Related Type'), // 2
+    opt('gsBusinessCategory', 'Business Category'), // 3
+    opt('gsBusinessIndustryType', 'Business / Industry Type'), // 4
+    opt('gsReserved5', 'Reserved'), // 5
+    opt('gsNamePrefix', 'Individual Name Prefix'), // 6
+    opt('gsFullName', 'Full Name'), // 7 (individual full name OR corporate entity name)
+    opt('gsGender', 'Gender'), // 8
+    opt('gsCompanyRegNumber', 'Company Registration Number'), // 9
+    date('gsDateOfIncorporation', 'Date of Incorporation'), // 10
+    date('gsDateOfBirth', 'Date of Birth'), // 11 (also carries corporate DOI in the sample)
+    opt('gsPan', 'PAN'), // 12
+    opt('gsVoterId', 'Voter ID'), // 13
+    opt('gsPassport', 'Passport Number'), // 14
+    opt('gsDrivingLicence', 'Driving Licence ID'), // 15
+    opt('gsUid', 'UID'), // 16
+    opt('gsRationCard', 'Ration Card No'), // 17
+    opt('gsCin', 'CIN'), // 18
+    opt('gsDin', 'DIN'), // 19
+    opt('gsTin', 'TIN'), // 20
+    opt('gsServiceTax', 'Service Tax #'), // 21
+    opt('gsOtherId', 'Other ID'), // 22
+    opt('gsAddressLine1', 'Address Line 1'), // 23
+    opt('gsAddressLine2', 'Address Line 2'), // 24
+    opt('gsAddressLine3', 'Address Line 3'), // 25
+    opt('gsCity', 'City/Town'), // 26
+    opt('gsDistrict', 'District'), // 27
+    opt('gsStateCode', 'State/Union Territory'), // 28
+    opt('gsPinCode', 'Pin Code'), // 29
+    opt('gsCountry', 'Country'), // 30
+    opt('gsMobile', 'Mobile Number(s)'), // 31
+    opt('gsTelNumber', 'Telephone Number(s)'), // 32
+    opt('gsTelAreaCode', 'Telephone Area Code'), // 33
+    opt('gsFaxNumber', 'Fax Number(s)'), // 34
+    opt('gsFaxAreaCode', 'Fax Area Code'), // 35
+    opt('gsPercentControl', 'Percentage of Control'), // 36
+    opt('gsFiller', 'Filler'), // 37 (pad to golden 38-token width)
   ],
 };
 

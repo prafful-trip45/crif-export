@@ -34,7 +34,7 @@ const META: FileMeta = {
 };
 
 describe('Commercial UCRF flat (Master Sheet) golden', () => {
-  it('explodes the flat row into HD/BS/AS/RS/CR/GS/SS/CD/TS', async () => {
+  it('explodes the flat row into HD/BS/AS/RS/CR/TS (segments emitted only when populated)', async () => {
     const buf = readFileSync(fix('input-corrected.xlsx'));
     const result = await convert(buf, commercialUcrfFlat, META);
 
@@ -43,48 +43,44 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
 
     expect(out[0]).toBe('HD|NBFCHE3014||26032026|31012026|01|');
     expect(out[1]).toBe('BS|HO||APL Infotech Limited||||AACCA3994L|||||12|06|06|||||||||||||');
+    // This sheet uses the "<street>, <City> - <PIN>. COUNTRY" form (no state name in
+    // the text) -> Line 1 is the street portion, state via the city lookup.
     expect(out[2]).toBe(
       "AS|01||D' Building, Shivsagar Estate, 6th Floor, Dr. Annie Besant Road,Worli|||Mumbai|Maharashtra|20|400018|079|||||||",
     );
     expect(out[3]).toBe(
       'RS|999999999|2|51||||Mr|HEMANT KUMAR RUIA|01|||24021958|AADPR8349A||||||||||||Mimraj Building, 405, Kalbadevi Road|||Mumbai|Maharashtra|20|400002|079|2222015336||||||',
     );
+    // Wilful-default DATE slot is a literal "0" (matches the client golden).
     expect(out[4]).toBe(
-      'CR|24020500002081||28062010|120000000|INR|5200||05|120000000|94510000||||0001||0|||||||||01|||||||||0||00|||||||',
+      'CR|24020500002081||28062010|120000000|INR|5200||05|120000000|94510000||||0001||0|||||||||01|||||||||0|0|00|||||||',
     );
-    expect(out[5]).toBe('GS|||||||||||||||||||||||||||||||||||||');
-    expect(out[6]).toBe('SS|||||||'); // no INR currency default on empty SS
-    expect(out[7]).toBe('CD|||||||');
-    expect(out[8]).toBe('TS|1|1|');
+    // No guarantor / security / cheque data on this row -> no GS/SS/CD filler lines.
+    expect(out[5]).toBe('TS|1|1|');
     expect(result.outputText!.endsWith('TS|1|1|\r\n')).toBe(true);
   });
 
-  it('matches the client golden after applying the documented divergences', async () => {
+  it('matches the client golden after applying the one documented divergence', async () => {
     const buf = readFileSync(fix('input-corrected.xlsx'));
     const golden = readFileSync(fix('golden-output.txt')).toString('latin1');
     const result = await convert(buf, commercialUcrfFlat, META);
 
-    // Transform the hand-made client golden (6 lines) into our expected output:
-    //   - normalize the RS line1 trailing comma + the wilful-date "0", and
-    //   - insert the empty GS/SS/CD filler lines our converter always emits.
-    const expected = golden
-      .replace('Kalbadevi Road,  |', 'Kalbadevi Road|')
-      .replace('|0|0|00|', '|0||00|')
-      .replace(
-        '\r\nTS|1|1|',
-        '\r\nGS|||||||||||||||||||||||||||||||||||||\r\nSS|||||||\r\nCD|||||||\r\nTS|1|1|',
-      );
+    // Only remaining divergence from the hand-made client golden: we trim the RS
+    // line-1 trailing comma+spaces. (The wilful-date "0" and the no-filler layout now
+    // match the golden exactly.)
+    const expected = golden.replace('Kalbadevi Road,  |', 'Kalbadevi Road|');
 
     expect(result.outputText!).toBe(expected);
   });
 
-  it('builds the multi-sheet workbook report (sheets + sorting)', async () => {
+  it('builds the multi-sheet workbook report (populated segments + sorting)', async () => {
     const buf = readFileSync(fix('input-corrected.xlsx'));
     const result = await convert(buf, commercialUcrfFlat, META, { report: true });
     expect(result.reportWorkbook).toBeInstanceOf(Buffer);
 
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(result.reportWorkbook! as unknown as ArrayBuffer);
+    // One sheet per format segment (GS/SS/CD sheets exist but are empty this row).
     expect(wb.worksheets.map((w) => w.name)).toEqual([
       'HD', 'BS', 'AS', 'RS', 'CR', 'GS', 'SS', 'CD', 'TS', 'sorting',
     ]);
@@ -92,7 +88,7 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
     // The sorting sheet lists every record in upload order with its Final Formula.
     const sorting = wb.getWorksheet('sorting')!;
     const tags = (sorting.getColumn(3).values as unknown[]).slice(2).filter(Boolean);
-    expect(tags).toEqual(['HD', 'BS', 'AS', 'RS', 'CR', 'GS', 'SS', 'CD', 'TS']);
+    expect(tags).toEqual(['HD', 'BS', 'AS', 'RS', 'CR', 'TS']);
     // The HD Final Formula equals the .txt header line.
     expect(sorting.getCell('D2').value).toBe('HD|NBFCHE3014||26032026|31012026|01|');
   });
@@ -109,9 +105,9 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
     const out = result.outputText!.split('\r\n');
     expect(out[0]).toBe('HD|NBF0000806||26032026|15032026|01|');
     expect(out[4]).toBe(
-      'CR|24020500002081||28062010|120000000|INR|300||05|120000000|94510000||||0001||0|||||||||01|||||||||0||00|||||||',
+      'CR|24020500002081||28062010|120000000|INR|300||05|120000000|94510000||||0001||0|||||||||01|||||||||0|0|00|||||||',
     );
-    expect(out[8]).toBe('TS|1|1|');
+    expect(out[5]).toBe('TS|1|1|');
   });
 
   it('reads Member ID / Reporting / Creation date from the Master Sheet header cells (overriding flags)', async () => {

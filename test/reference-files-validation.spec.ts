@@ -62,6 +62,12 @@ const CHECKS: Check[] = [
   { kind: 'smoke', input: 'consumer-input-2.xlsx', format: 'consumer-ucrf12-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'client-input-commercial-2.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'Captree_commercial_input.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  // 1 Jul batch: exercises guarantor (GS) + security (SS) blocks and both guarantor
+  // layouts. Smoke-only — the paired .txt outputs are hand-finalized (inconsistent
+  // relationship codes / address casing / stray whitespace) so they are NOT byte-
+  // reproducible; see the crif-commercial-format skill and COMMERCIAL_FLAT_PIPELINE.md.
+  { kind: 'smoke', input: 'commercial_input_1Jul.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  { kind: 'smoke', input: 'commercial_input_1Jul_OD_Loan.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
 ];
 
 const err = (r: any) => (r.report?.issues ?? []).filter((i: any) => i.severity === 'error');

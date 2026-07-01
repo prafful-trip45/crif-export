@@ -9,6 +9,7 @@ import type {
 import { formatDdmmyyyy } from '../encoding/formatters/date.js';
 import { coerceCell } from '../input/coerce.js';
 import { commercialUcrf } from './commercial-ucrf.js';
+import { STATE_CODE } from './enums/commercial-enums.js';
 
 /**
  * Commercial UCRF V3.9 — REAL-WORLD "Master Sheet" input profile.
@@ -61,54 +62,109 @@ function buildLegend(entries: LegendEntry[]): Map<string, string> {
   return m;
 }
 
-/** Input "Borrowers Legal Constitution" -> CRIF code (golden 2/Public Limited -> 12). */
+/**
+ * CRIF Commercial UCRF V3.9 catalogue 8.2 (authoritative — NOT the dropdown position).
+ * `num` = the Master-Sheet dropdown number; `code` = the CRIF wire code.
+ * See the `crif-commercial-format` skill.
+ */
 const LEGAL_CONSTITUTION = buildLegend([
   { code: '11', num: '1', labels: ['Private Limited'] },
   { code: '12', num: '2', labels: ['Public Limited'] },
-  { code: '13', num: '3', labels: ['Business Entities Created by Statute'] },
-  { code: '14', num: '4', labels: ['Proprietorship'] },
-  { code: '15', num: '5', labels: ['Partnership'] },
-  { code: '16', num: '6', labels: ['Trust'] },
-  { code: '17', num: '7', labels: ['HUF'] },
-  { code: '18', num: '8', labels: ['Co-operative Society'] },
-  { code: '19', num: '9', labels: ['Association of Persons'] },
-  { code: '20', num: '10', labels: ['Government'] },
-  { code: '21', num: '11', labels: ['Self Help Group'] },
+  { code: '20', num: '3', labels: ['Business Entities Created by Statute'] },
+  { code: '30', num: '4', labels: ['Proprietorship'] },
+  { code: '40', num: '5', labels: ['Partnership'] },
+  { code: '50', num: '6', labels: ['Trust'] },
+  { code: '55', num: '7', labels: ['HUF', 'Hindu Undivided Family'] },
+  { code: '60', num: '8', labels: ['Co-operative Society', 'Cooperative Society'] },
+  { code: '70', num: '9', labels: ['Association of Persons'] },
+  { code: '80', num: '10', labels: ['Government'] },
+  { code: '85', num: '11', labels: ['Self Help Group'] },
 ]);
 
-/** Input "Relationship Type" -> CRIF RS code (golden 7/Promoter Director -> 51). */
+/**
+ * CRIF Commercial UCRF V3.9 catalogue 8.7 (authoritative). The Master-Sheet dropdown
+ * number differs from the wire code (e.g. dropdown "7. Promoter Director" -> 51).
+ */
 const RELATIONSHIP_TYPE = buildLegend([
-  { code: '45', num: '1', labels: ['Shareholder'] },
-  { code: '46', num: '2', labels: ['Holding Company'] },
-  { code: '47', num: '3', labels: ['Subsidiary Company'] },
-  { code: '48', num: '4', labels: ['Proprietor'] },
-  { code: '49', num: '5', labels: ['Partner'] },
-  { code: '50', num: '6', labels: ['Trustee'] },
+  { code: '10', num: '1', labels: ['Shareholder'] },
+  { code: '11', num: '2', labels: ['Holding Company'] },
+  { code: '12', num: '3', labels: ['Subsidiary Company'] },
+  { code: '20', num: '4', labels: ['Proprietor'] },
+  { code: '30', num: '5', labels: ['Partner'] },
+  { code: '40', num: '6', labels: ['Trustee'] },
   { code: '51', num: '7', labels: ['Promoter Director'] },
   { code: '52', num: '8', labels: ['Nominee Director'] },
   { code: '53', num: '9', labels: ['Independent Director'] },
-  { code: '54', num: '10', labels: ['Individual Member of SHG'] },
-  { code: '55', num: '11', labels: ['Other Director'] },
-  { code: '56', num: '12', labels: ['Others'] },
-  { code: '57', num: '13', labels: ['Karta (HUF)', 'Karta'] },
+  { code: '54', num: '10', labels: ['Director - Since Resigned', 'Director Since Resigned'] },
+  { code: '55', num: '11', labels: ['Individual Member of SHG'] },
+  { code: '56', num: '12', labels: ['Other Director'] },
+  { code: '60', num: '13', labels: ['Others'] },
+  { code: '70', num: '14', labels: ['Karta (HUF)', 'Karta'] },
 ]);
 
-/** Input "Asset Classification" -> CRIF CR code (golden Standard -> 0001). */
+/**
+ * CRIF Commercial UCRF V3.9 catalogue 8.10 (authoritative, non-sequential). `num` is
+ * the Master-Sheet dropdown number; `code` is the CRIF code (e.g. "6. SMA 2" -> 0008).
+ */
 const ASSET_CLASSIFICATION = buildLegend([
   { code: '0001', num: '1', labels: ['Standard'] },
   { code: '0002', num: '2', labels: ['Sub-standard', 'Substandard'] },
-  { code: '0003', num: '3', labels: ['Loss'] },
-  { code: '0004', num: '4', labels: ['SMA 0', 'SMA0', 'SMA 0 - Principal or interest payment not overdue for more than 30 days but account showing signs of incipient stress.'] },
-  { code: '0005', num: '5', labels: ['SMA 1', 'SMA1', 'SMA 1 - Principal or interest payment overdue between 31-60 days'] },
-  { code: '0006', num: '6', labels: ['SMA 2', 'SMA2', 'NA', 'Not applicable'] },
-  { code: '0007', num: '7', labels: ['Doubtful -1', 'Doubtful-1'] },
-  { code: '0008', num: '8', labels: ['Doubtful -2', 'Doubtful-2'] },
-  { code: '0009', num: '9', labels: ['Doubtful -3', 'Doubtful-3'] },
-  { code: '0010', num: '10', labels: ['Non-Performing Assets (NPA)', 'NPA'] },
-  { code: '0011', num: '11', labels: ['ARC Loan'] },
-  { code: '0012', num: '12', labels: ['1 Day Past Due'] },
-  { code: '0013', num: '13', labels: ['2 Days Past Due'] },
-  { code: '0000', num: '14', labels: ['0 Day Past Due'] },
+  { code: '0004', num: '3', labels: ['Loss'] },
+  { code: '0006', num: '4', labels: ['SMA 0', 'SMA0'] },
+  { code: '0007', num: '5', labels: ['SMA 1', 'SMA1'] },
+  { code: '0008', num: '6', labels: ['SMA 2', 'SMA2', 'NA', 'Not applicable'] },
+  { code: '0009', num: '7', labels: ['Doubtful -1', 'Doubtful-1'] },
+  { code: '0010', num: '8', labels: ['Doubtful -2', 'Doubtful-2'] },
+  { code: '0011', num: '9', labels: ['Doubtful -3', 'Doubtful-3'] },
+  { code: '0012', num: '10', labels: ['Non-Performing Assets (NPA)', 'NPA'] },
+  { code: '0013', num: '11', labels: ['ARC Loan'] },
+  { code: '1001', num: '12', labels: ['1 Day Past Due'] },
+  { code: '1002', num: '13', labels: ['2 Days Past Due'] },
+  { code: '1000', num: '14', labels: ['0 Day Past Due'] },
+]);
+
+/** Business Category (8.3) & Business/Industry Type (8.4): code = dropdown position. */
+const BUSINESS_CATEGORY = buildLegend([
+  { code: '01', num: '1', labels: ['MSME'] },
+  { code: '02', num: '2', labels: ['SME'] },
+  { code: '03', num: '3', labels: ['Micro'] },
+  { code: '04', num: '4', labels: ['Small'] },
+  { code: '05', num: '5', labels: ['Medium'] },
+  { code: '06', num: '6', labels: ['Large'] },
+  { code: '07', num: '7', labels: ['Others'] },
+]);
+const BUSINESS_INDUSTRY = buildLegend([
+  { code: '01', num: '1', labels: ['Manufacturing'] },
+  { code: '02', num: '2', labels: ['Distribution'] },
+  { code: '03', num: '3', labels: ['Wholesale'] },
+  { code: '04', num: '4', labels: ['Trading'] },
+  { code: '05', num: '5', labels: ['Broking'] },
+  { code: '06', num: '6', labels: ['Service Provider'] },
+  { code: '07', num: '7', labels: ['Importing'] },
+  { code: '08', num: '8', labels: ['Exporting'] },
+  { code: '09', num: '9', labels: ['Agriculture'] },
+  { code: '10', num: '10', labels: ['Dealers'] },
+  { code: '11', num: '11', labels: ['Others'] },
+]);
+
+/** Guarantor Type / Related Type dropdown -> code (1-4, from the sheet legend). */
+const RELATED_TYPE = buildLegend([
+  { code: '01', num: '1', labels: ['Business Entity Registered in India'] },
+  { code: '02', num: '2', labels: ['Resident Indian Individual'] },
+  { code: '03', num: '3', labels: ['Business Entity Registered Outside India'] },
+  { code: '04', num: '4', labels: ['Foreign/ Non-Resident Indian Individual', 'Foreign Non-Resident Indian Individual'] },
+]);
+
+/** Security Classification (8.15): dropdown 1-8 -> CRIF code (collateral is 21-24). */
+const SECURITY_CLASS = buildLegend([
+  { code: '01', num: '1', labels: ['Primary - First Charge', 'Primary – First Charge'] },
+  { code: '02', num: '2', labels: ['Primary - Second Charge', 'Primary – Second Charge'] },
+  { code: '03', num: '3', labels: ['Primary - Third Charge', 'Primary – Third Charge'] },
+  { code: '04', num: '4', labels: ['Primary - Parri Passu', 'Primary – Parri Passu'] },
+  { code: '21', num: '5', labels: ['Collateral - First Charge', 'Collateral – First Charge'] },
+  { code: '22', num: '6', labels: ['Collateral - Second Charge', 'Collateral – Second Charge'] },
+  { code: '23', num: '7', labels: ['Collateral - Third Charge', 'Collateral – Third Charge'] },
+  { code: '24', num: '8', labels: ['Collateral - Parri Passu', 'Collateral – Parri Passu'] },
 ]);
 
 /** Input "Account Status" -> CRIF CR code (golden Open -> 01). */
@@ -139,7 +195,9 @@ const REPAYMENT_FREQUENCY = buildLegend([
   { code: '08', num: '8', labels: ['Others'] },
 ]);
 
-/** Gender text -> CRIF code + courtesy prefix (RS / GS individuals). */
+/** Gender text -> CRIF code + courtesy prefix (RS / GS individuals). Title-case is the
+ * canonical form; some hand-made goldens upper-case the RS prefix (`MR`/`MRS`) — that
+ * is a source artifact we do not reproduce. */
 const GENDER_CODE: Record<string, string> = { male: '01', female: '02', transgender: '03' };
 const GENDER_PREFIX: Record<string, string> = { male: 'Mr', female: 'Ms', transgender: '' };
 
@@ -166,10 +224,10 @@ function normalize(s: string): string {
   return s.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[“”„‘’]/g, '');
 }
 
-/** Zero-pad a small numeric legend to 2 digits (Business Category / Industry). */
+/** Zero-pad a small numeric legend to 2 digits; blank for non-numeric ("NA"). */
 function pad2Legend(v: FieldValue): string {
   const s = codeKey(v);
-  return s === '' ? '' : s.padStart(2, '0');
+  return /^\d+$/.test(s) ? s.padStart(2, '0') : '';
 }
 
 /** Parse a date-ish input cell to DDMMYYYY (Date, Excel serial, or string). */
@@ -179,24 +237,135 @@ function ddmmyyyy(v: FieldValue): string {
   return coerced instanceof Date ? formatDdmmyyyy(coerced) : str(v);
 }
 
-/** Whole-rupee string (drop any decimals / scientific noise). */
+/** Whole-rupee string (drop any decimals / scientific noise; "NA" -> blank). */
 function rupees(v: FieldValue): string {
-  const s = str(v);
+  const s = strNA(v);
   if (s === '') return '';
   const n = Number(s.replace(/,/g, ''));
   return Number.isFinite(n) ? String(Math.round(n)) : s;
 }
 
+/** `str`, but treats the accountant placeholder "NA" as blank. */
+function strNA(v: FieldValue): string {
+  const s = str(v);
+  return s.toUpperCase() === 'NA' ? '' : s;
+}
+
+/** Zero-pad a small numeric legend to 3 digits (Security Type 001–011); blank for "NA". */
+function pad3Legend(v: FieldValue): string {
+  const s = codeKey(v);
+  return /^\d+$/.test(s) ? s.padStart(3, '0') : '';
+}
+
 /**
- * Split a free-text "<street…>, <City> - <PIN>. <COUNTRY>" string into the AS/RS
- * sub-fields CRIF expects. Tuned to the accountant convention in the sample:
- *   "D' Building, … Besant Road,Worli, Mumbai - 400018. INDIA"
- *      -> line1="D' Building, … Besant Road,Worli", city="Mumbai", pin="400018"
- *   "Mimraj Building, 405, Kalbadevi Road, Mumbai 400002"
- *      -> line1="Mimraj Building, 405, Kalbadevi Road", city="Mumbai", pin="400002"
- * `line1` is kept VERBATIM (commas/spacing preserved) up to the comma before the
- * city; the trailing "<City> - <PIN>. COUNTRY" tail is removed. District/state are
- * derived from the city (the flat sheet carries no separate state column).
+ * Resolve an address into the CRIF sub-fields, preferring explicit City/State/PIN
+ * columns (future template) over values parsed from the free-text address. `state`
+ * may be a state name or a 2-digit code.
+ */
+function resolveAddress(
+  raw: FieldValue,
+  city?: FieldValue,
+  state?: FieldValue,
+  pin?: FieldValue,
+): { line1: string; city: string; stateName: string; stateCode: string; pinCode: string } {
+  const parsed = splitAddress(raw);
+  let stateName = parsed.stateName;
+  let stateCode = parsed.stateCode;
+  const st = strNA(state);
+  if (st !== '') {
+    const byName = STATE_LOOKUP.find((x) => x.needle === st.toLowerCase());
+    const byCode = (STATE_CODE as Record<string, string>)[st];
+    if (byName) {
+      stateName = byName.name;
+      stateCode = byName.code;
+    } else if (byCode) {
+      stateName = byCode;
+      stateCode = st;
+    } else {
+      stateName = st;
+      stateCode = '';
+    }
+  }
+  return {
+    line1: parsed.line1,
+    city: strNA(city) || parsed.city,
+    stateName,
+    stateCode,
+    pinCode: strNA(pin) || parsed.pinCode,
+  };
+}
+
+/* ---------- state lookup (CRIF catalogue 8.6, name -> code) ---------- */
+
+/** Canonical state names sorted longest-first so "Uttar Pradesh" wins over any
+ * shorter partial; a few common spelling aliases fold onto the canonical name. */
+const STATE_ALIASES: Record<string, string> = {
+  odisha: 'Orissa',
+  delhi: 'New Delhi',
+  pondicherry: 'Puducherry',
+  uttaranchal: 'Uttarakhand',
+  // common accountant misspellings seen in real Master Sheets
+  gujrat: 'Gujarat',
+  maharastra: 'Maharashtra',
+  karnatka: 'Karnataka',
+};
+const STATE_LOOKUP: Array<{ needle: string; name: string; code: string }> = (() => {
+  const out: Array<{ needle: string; name: string; code: string }> = [];
+  for (const [code, name] of Object.entries(STATE_CODE)) out.push({ needle: name.toLowerCase(), name, code });
+  for (const [alias, canonical] of Object.entries(STATE_ALIASES)) {
+    const hit = out.find((s) => s.name === canonical);
+    if (hit) out.push({ needle: alias, name: hit.name, code: hit.code });
+  }
+  return out.sort((a, b) => b.needle.length - a.needle.length);
+})();
+
+/** Find the last-occurring known state name in a free-text address. */
+function findState(lower: string): { name: string; code: string; index: number } | undefined {
+  let best: { name: string; code: string; index: number } | undefined;
+  for (const s of STATE_LOOKUP) {
+    const re = new RegExp(`\\b${s.needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+    const m = re.exec(lower);
+    if (m && (!best || m.index > best.index)) best = { name: s.name, code: s.code, index: m.index };
+  }
+  return best;
+}
+
+/**
+ * City -> { state code, state name } fallback for sheets whose address text carries
+ * the CITY but no STATE name (e.g. "…Worli, Mumbai - 400018. INDIA"). Codes are the
+ * CRIF 8.6 state codes. Extend as needed.
+ */
+const CITY_STATE: Record<string, { code: string; name: string }> = {
+  mumbai: { code: '20', name: 'Maharashtra' },
+  pune: { code: '20', name: 'Maharashtra' },
+  nagpur: { code: '20', name: 'Maharashtra' },
+  ahmedabad: { code: '11', name: 'Gujarat' },
+  surat: { code: '11', name: 'Gujarat' },
+  vadodara: { code: '11', name: 'Gujarat' },
+  bengaluru: { code: '16', name: 'Karnataka' },
+  bangalore: { code: '16', name: 'Karnataka' },
+  chennai: { code: '31', name: 'Tamil Nadu' },
+  kolkata: { code: '35', name: 'West Bengal' },
+  hyderabad: { code: '36', name: 'Telangana' },
+};
+
+/** Strip a trailing country word + a " - <PIN>" / " <PIN>" tail from a city token. */
+function cleanCityToken(token: string): string {
+  return token
+    .replace(/[.,\s]*india\.?\s*$/i, '')
+    .replace(/[\s\-]*\d{6}\s*$/, '')
+    .replace(/[\s,\-]+$/, '')
+    .trim();
+}
+
+/**
+ * Parse a free-text address into the AS/RS/GS sub-fields. Two accountant conventions
+ * are supported and detected by whether a STATE NAME appears in the text:
+ *   - state IS in the text  ("…Rampur Uttar Pradesh 244927"): Line 1 keeps the FULL
+ *     address; city = the comma-segment (else word) immediately before the state.
+ *   - state is NOT in the text ("…Worli, Mumbai - 400018. INDIA"): the older
+ *     "<street>, <City> - <PIN>. COUNTRY" form — Line 1 is the street portion (tail
+ *     stripped), city from the PIN tail, state via CITY_STATE lookup.
  */
 function splitAddress(raw: FieldValue): {
   line1: string;
@@ -205,35 +374,43 @@ function splitAddress(raw: FieldValue): {
   stateCode: string;
   pinCode: string;
 } {
-  let s = str(raw);
-  let pinCode = '';
+  const full = str(raw);
+  if (full === '' || full.toUpperCase() === 'NA') {
+    return { line1: '', city: '', stateName: '', stateCode: '', pinCode: '' };
+  }
+  const st = findState(full.toLowerCase());
+  if (st) {
+    const pinCode = /(\d{6})\b/.exec(full)?.[1] ?? '';
+    const before = full.slice(0, st.index).replace(/[\s,\-]+$/, '');
+    const lastComma = before.lastIndexOf(',');
+    const city = (lastComma >= 0 ? before.slice(lastComma + 1) : before.split(/\s+/).pop() ?? '').trim();
+    return { line1: full, city, stateName: st.name, stateCode: st.code, pinCode };
+  }
+
+  // Older "<street>, <City> - <PIN>. COUNTRY" form: strip the tail off Line 1.
+  let s = full.replace(/[.,\s]*india\.?\s*$/i, '').trim();
   let city = '';
-
-  // Drop a trailing country word (INDIA / India.) and stray punctuation.
-  s = s.replace(/[.,\s]*india\.?\s*$/i, '').trim();
-
   const pinMatch = /(\d{6})\b/.exec(s);
+  const pinCode = pinMatch?.[1] ?? '';
   if (pinMatch) {
-    pinCode = pinMatch[1]!;
-    // Tail from the last comma before the PIN is "<City> - <PIN>"; line1 precedes it.
     const beforePin = s.slice(0, pinMatch.index);
     const lastComma = beforePin.lastIndexOf(',');
     if (lastComma >= 0) {
-      city = stripCityPin(beforePin.slice(lastComma + 1));
+      city = cleanCityToken(beforePin.slice(lastComma + 1));
       s = beforePin.slice(0, lastComma).replace(/[\s,]+$/, '');
     } else {
-      city = stripCityPin(beforePin);
+      city = cleanCityToken(beforePin);
       s = '';
     }
   }
-
-  const st = cityToState(city);
-  return { line1: s.trim(), city, stateName: st.name, stateCode: st.code, pinCode };
-}
-
-/** Remove a trailing " - 400018" / " 400018" PIN tail and dashes from a city token. */
-function stripCityPin(token: string): string {
-  return token.replace(/[\s\-]*\d{6}\s*$/, '').replace(/[\s\-]+$/, '').trim();
+  const looked = CITY_STATE[city.toLowerCase()];
+  return {
+    line1: s.trim(),
+    city,
+    stateName: looked?.name ?? '',
+    stateCode: looked?.code ?? '',
+    pinCode,
+  };
 }
 
 /* ---------- the flat-row -> segments mapping ---------- */
@@ -313,6 +490,14 @@ const COLUMN_HEADERS: Record<string, string> = {
   "Related Person's PAN": 'relatedPan',
   "Related Person's Address with PIN Code": 'relatedAddress',
   "Related Person's Contact No": 'relatedContact',
+  // Security (unique headers — safe to match by label)
+  'Value of Security': 'securityValue',
+  'Type of Security': 'securityType',
+  'Security Classification': 'securityClass',
+  // Optional explicit address columns (future template; absent in the 1 Jul sheets)
+  "Borrower's City": 'borrowerCity',
+  "Borrower's State": 'borrowerState',
+  "Borrower's PIN": 'borrowerPin',
 };
 
 function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): SegmentSeed[] {
@@ -329,16 +514,16 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
       borrowerName: str(input.borrowerName),
       pan: str(input.pan),
       legalConstitution: mapLegend(LEGAL_CONSTITUTION, input.legalConstitution) ?? '',
-      businessCategory: pad2Legend(input.businessCategory),
-      businessIndustryType: pad2Legend(input.businessIndustryType),
+      businessCategory: mapLegend(BUSINESS_CATEGORY, input.businessCategory) ?? '',
+      businessIndustryType: mapLegend(BUSINESS_INDUSTRY, input.businessIndustryType) ?? '',
     }),
   });
 
   // ---- AS (borrower address) ----
-  // The Master-Sheet address embeds the city but not the state; CRIF wants the
-  // state name in the District field and the 2-digit code in State (derived from
-  // the city). Country here carries the telephone area code per the sample.
-  const ba = splitAddress(input.address);
+  // Address Line 1 keeps the full text; City / State (District field) / State-code /
+  // PIN are extracted from it (or from explicit columns when the template has them).
+  // Country carries the telephone STD code per the sample.
+  const ba = resolveAddress(input.address, input.borrowerCity, input.borrowerState, input.borrowerPin);
   seeds.push({
     tag: 'AS',
     flag: 2,
@@ -351,13 +536,14 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
       stateCode: ba.stateCode,
       pinCode: ba.pinCode,
       country: DEFAULTS.countryCode,
+      mobileNumber: strNA(input.contactNo),
     }),
   });
 
   // ---- RS (related person) — only when a related person is present ----
-  if (str(input.relatedName) !== '') {
+  if (strNA(input.relatedName) !== '') {
     const g = str(input.relatedGender).toLowerCase();
-    const ra = splitAddress(input.relatedAddress);
+    const ra = resolveAddress(input.relatedAddress);
     seeds.push({
       tag: 'RS',
       flag: 3,
@@ -367,17 +553,17 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
         relatedType: '2', // Resident Indian Individual (individual related person)
         relationship: mapLegend(RELATIONSHIP_TYPE, input.relationshipType) ?? '',
         namePrefix: GENDER_PREFIX[g] ?? '',
-        fullName: str(input.relatedName),
+        fullName: strNA(input.relatedName),
         gender: GENDER_CODE[g] ?? '',
         dateOfBirth: ddmmyyyy(input.relatedDob),
-        rsPan: str(input.relatedPan),
+        rsPan: strNA(input.relatedPan),
         rsAddressLine1: ra.line1,
         rsCity: ra.city,
         rsDistrict: ra.stateName,
         rsStateCode: ra.stateCode,
         rsPinCode: ra.pinCode,
         rsCountry: DEFAULTS.countryCode,
-        rsMobile: str(input.relatedContact),
+        rsMobile: strNA(input.relatedContact),
       }),
     });
   }
@@ -402,21 +588,62 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
       assetClassification: mapLegend(ASSET_CLASSIFICATION, input.assetClassification) ?? '',
       amountOverdue: rupees(input.amountOverdue) || '0',
       accountStatus: mapLegend(ACCOUNT_STATUS, input.accountStatus) ?? '',
-      // Wilful-default status 0 = No; suit-filed status 00 = none. (The hand-made
-      // golden also stamps "0" in the wilful-default DATE slot; we leave it blank
-      // as that field is a real date — the only intentional 1-token divergence.)
+      // Wilful-default status 0 = No; the DATE slot is likewise a literal "0" (both
+      // goldens do this — FLAT_BODY relaxes that field to string); suit-filed 00 = none.
       wilfulDefaultStatus: wilfulCode(input.wilfulDefault) || '0',
+      wilfulDefaultDate: '0',
       suitFiledStatus: '00',
     }),
   });
 
-  // GS (guarantor), SS (security), CD (cheque-dishonour) are ALWAYS emitted as
-  // empty filler records per borrower, mirroring the accountant working file's
-  // segment sheets (HD/BS/AS/RS/CR/GS/SS/CD/TS). Guarantor/security/cheque columns
-  // exist in the Master Sheet but are blank for this borrower; wire them when populated.
-  seeds.push({ tag: 'GS', flag: 5, values: row({ _tag: 'GS' }) });
-  seeds.push({ tag: 'SS', flag: 6, values: row({ _tag: 'SS' }) });
-  seeds.push({ tag: 'CD', flag: 7, values: row({ _tag: 'CD' }) });
+  // ---- GS (guarantors) — one per populated guarantor block ----
+  // Guarantor blocks repeat side-by-side with identical headers, so read them
+  // positionally from the raw row (up to 3 in the standard template, 1 in the OD
+  // template with a Contact column). Empty/"NA" blocks emit nothing.
+  for (const gtor of readGuarantorBlocks(ctx.rawCells)) {
+    const name = strNA(gtor.fullName) || strNA(gtor.entityName);
+    if (name === '') continue;
+    const g = strNA(gtor.gender).toLowerCase();
+    const ga = resolveAddress(gtor.address);
+    seeds.push({
+      tag: 'GS',
+      flag: 5,
+      values: row({
+        _tag: 'GS',
+        gsDuns: DEFAULTS.relationshipDuns,
+        gsRelatedType: mapLegend(RELATED_TYPE, gtor.type) ?? '',
+        gsNamePrefix: GENDER_PREFIX[g] ?? '',
+        gsFullName: name,
+        gsGender: GENDER_CODE[g] ?? '',
+        gsDateOfBirth: ddmmyyyy(gtor.dob),
+        gsPan: strNA(gtor.pan),
+        gsAddressLine1: ga.line1,
+        gsCity: ga.city,
+        gsDistrict: ga.stateName,
+        gsStateCode: ga.stateCode,
+        gsPinCode: ga.pinCode,
+        gsCountry: DEFAULTS.countryCode,
+        gsMobile: strNA(gtor.contact),
+      }),
+    });
+  }
+
+  // ---- SS (security) — only when a security value/type is present ----
+  const secValue = rupees(input.securityValue);
+  const secType = pad3Legend(input.securityType);
+  if (secValue !== '' || secType !== '') {
+    seeds.push({
+      tag: 'SS',
+      flag: 6,
+      values: row({
+        _tag: 'SS',
+        securityValue: secValue,
+        ssCurrency: DEFAULTS.currencyCode,
+        securityType: secType,
+        securityClassification: mapLegend(SECURITY_CLASS, input.securityClass) ?? '',
+      }),
+    });
+  }
 
   // Attach mapping issues to the CR seed (where they originate).
   if (issues.length) {
@@ -424,6 +651,55 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
     if (cr) cr.issues = issues;
   }
   return seeds;
+}
+
+/** A guarantor sub-block read positionally from the raw row (fields by sub-header). */
+interface GuarantorBlock {
+  type: FieldValue;
+  entityName: FieldValue;
+  fullName: FieldValue;
+  dob: FieldValue;
+  pan: FieldValue;
+  gender: FieldValue;
+  address: FieldValue;
+  contact: FieldValue;
+}
+
+/**
+ * Detect the side-by-side guarantor blocks. Each block starts at a "Guarantor Type"
+ * column and runs until the next one (or the first non-guarantor column). Within a
+ * block the columns are mapped by their own (unique) sub-headers, so both templates
+ * work — the 3-block layout (Entity/Name/DOB/PAN/Aadhaar/Gender/Address) and the
+ * 1-block OD layout (Entity/Name/Gender/Address/Contact).
+ */
+function readGuarantorBlocks(rawCells: FlatExplodeContext['rawCells']): GuarantorBlock[] {
+  if (!rawCells) return [];
+  const isType = (h: string) => normalize(h).startsWith('guarantor type');
+  const starts = rawCells.filter((c) => isType(c.header)).map((c) => c.col);
+  if (starts.length === 0) return [];
+  const blocks: GuarantorBlock[] = [];
+  for (let i = 0; i < starts.length; i++) {
+    const from = starts[i]!;
+    const to = i + 1 < starts.length ? starts[i + 1]! : Infinity;
+    const blk: GuarantorBlock = {
+      type: undefined, entityName: undefined, fullName: undefined, dob: undefined,
+      pan: undefined, gender: undefined, address: undefined, contact: undefined,
+    };
+    for (const c of rawCells) {
+      if (c.col < from || c.col >= to) continue;
+      const h = normalize(c.header);
+      if (h.startsWith('guarantor type')) blk.type = c.value;
+      else if (h.startsWith('guarantor entity name')) blk.entityName = c.value;
+      else if (h.startsWith('full name')) blk.fullName = c.value;
+      else if (h.includes('date of birth')) blk.dob = c.value;
+      else if (h.includes('pan')) blk.pan = c.value;
+      else if (h.startsWith('gender')) blk.gender = c.value;
+      else if (h.includes('address')) blk.address = c.value;
+      else if (h.includes('contact')) blk.contact = c.value;
+    }
+    blocks.push(blk);
+  }
+  return blocks;
 }
 
 /** Resolve Credit Type text via the workbook's "Credit Type Code" lookup. */
@@ -454,30 +730,6 @@ function wilfulCode(v: FieldValue): string {
   return s;
 }
 
-/**
- * City -> { state code, state name } for the metros the Master Sheet uses (the
- * flat sheet has no separate state column). The codes follow the CLIENT's CIBIL
- * commercial state table (e.g. Maharashtra = 20, per the golden sample), which is
- * NOT the same numbering as `STATE_CODE` in commercial-enums. Extend as needed.
- */
-const CITY_STATE: Record<string, { code: string; name: string }> = {
-  mumbai: { code: '20', name: 'Maharashtra' },
-  pune: { code: '20', name: 'Maharashtra' },
-  nagpur: { code: '20', name: 'Maharashtra' },
-  ahmedabad: { code: '11', name: 'Gujarat' },
-  surat: { code: '11', name: 'Gujarat' },
-  delhi: { code: '07', name: 'Delhi' },
-  'new delhi': { code: '07', name: 'Delhi' },
-  bengaluru: { code: '10', name: 'Karnataka' },
-  bangalore: { code: '10', name: 'Karnataka' },
-  chennai: { code: '23', name: 'Tamil Nadu' },
-  kolkata: { code: '33', name: 'West Bengal' },
-  hyderabad: { code: '36', name: 'Telangana' },
-};
-function cityToState(city: string): { code: string; name: string } {
-  return CITY_STATE[city.toLowerCase()] ?? { code: '', name: '' };
-}
-
 /** Build a TypedRow from a sparse object (undefined keys stay blank). */
 function row(values: Record<string, FieldValue>): TypedRow {
   return values as TypedRow;
@@ -488,16 +740,25 @@ function row(values: Record<string, FieldValue>): TypedRow {
  * emits an empty `SS|||||||` filler (the accountant working file does not stamp the
  * INR currency default on an empty security segment), so drop SS's currency default.
  */
-const FLAT_BODY: SegmentSpec[] = commercialUcrf.body.map((seg) =>
-  seg.tag !== 'SS'
-    ? seg
-    : {
-        ...seg,
-        fields: seg.fields.map((f) =>
-          f.key === 'ssCurrency' ? { ...f, default: undefined } : f,
-        ),
-      },
-);
+const FLAT_BODY: SegmentSpec[] = commercialUcrf.body.map((seg) => {
+  if (seg.tag === 'SS') {
+    return {
+      ...seg,
+      fields: seg.fields.map((f) => (f.key === 'ssCurrency' ? { ...f, default: undefined } : f)),
+    };
+  }
+  if (seg.tag === 'CR') {
+    // The golden stamps a literal "0" (not a date) in the wilful-default DATE slot;
+    // relax that field to a plain string so the placeholder passes validation.
+    return {
+      ...seg,
+      fields: seg.fields.map((f) =>
+        f.key === 'wilfulDefaultDate' ? { ...f, type: 'string' as const } : f,
+      ),
+    };
+  }
+  return seg;
+});
 
 export const commercialUcrfFlat: FormatSpec = {
   ...commercialUcrf,
