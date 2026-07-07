@@ -68,17 +68,17 @@ function buildLegend(entries: LegendEntry[]): Map<string, string> {
  * See the `crif-commercial-format` skill.
  */
 const LEGAL_CONSTITUTION = buildLegend([
-  { code: '11', num: '1', labels: ['Private Limited'] },
-  { code: '12', num: '2', labels: ['Public Limited'] },
+  { code: '11', num: '1', labels: ['Private Limited', 'Pvt Ltd', 'Pvt. Ltd.', 'Private Ltd', 'Pvt Limited'] },
+  { code: '12', num: '2', labels: ['Public Limited', 'Public Ltd', 'Pub Ltd'] },
   { code: '20', num: '3', labels: ['Business Entities Created by Statute'] },
-  { code: '30', num: '4', labels: ['Proprietorship'] },
-  { code: '40', num: '5', labels: ['Partnership'] },
+  { code: '30', num: '4', labels: ['Proprietorship', 'Proprietor', 'Sole Proprietorship'] },
+  { code: '40', num: '5', labels: ['Partnership', 'Partnership Firm'] },
   { code: '50', num: '6', labels: ['Trust'] },
   { code: '55', num: '7', labels: ['HUF', 'Hindu Undivided Family'] },
   { code: '60', num: '8', labels: ['Co-operative Society', 'Cooperative Society'] },
   { code: '70', num: '9', labels: ['Association of Persons'] },
   { code: '80', num: '10', labels: ['Government'] },
-  { code: '85', num: '11', labels: ['Self Help Group'] },
+  { code: '85', num: '11', labels: ['Self Help Group', 'SHG'] },
 ]);
 
 /**
@@ -93,7 +93,7 @@ const RELATIONSHIP_TYPE = buildLegend([
   { code: '30', num: '5', labels: ['Partner'] },
   { code: '40', num: '6', labels: ['Trustee'] },
   { code: '51', num: '7', labels: ['Promoter Director'] },
-  { code: '52', num: '8', labels: ['Nominee Director'] },
+  { code: '52', num: '8', labels: ['Nominee Director', 'Nominee'] },
   { code: '53', num: '9', labels: ['Independent Director'] },
   { code: '54', num: '10', labels: ['Director - Since Resigned', 'Director Since Resigned'] },
   { code: '55', num: '11', labels: ['Individual Member of SHG'] },
@@ -149,8 +149,8 @@ const BUSINESS_INDUSTRY = buildLegend([
 
 /** Guarantor Type / Related Type dropdown -> code (1-4, from the sheet legend). */
 const RELATED_TYPE = buildLegend([
-  { code: '01', num: '1', labels: ['Business Entity Registered in India'] },
-  { code: '02', num: '2', labels: ['Resident Indian Individual'] },
+  { code: '01', num: '1', labels: ['Business Entity Registered in India', 'Business registred in india', 'Business Entity Registered India'] },
+  { code: '02', num: '2', labels: ['Resident Indian Individual', 'Resident India Individual', 'Individual'] },
   { code: '03', num: '3', labels: ['Business Entity Registered Outside India'] },
   { code: '04', num: '4', labels: ['Foreign/ Non-Resident Indian Individual', 'Foreign Non-Resident Indian Individual'] },
 ]);
@@ -230,25 +230,66 @@ function pad2Legend(v: FieldValue): string {
   return /^\d+$/.test(s) ? s.padStart(2, '0') : '';
 }
 
-/** Parse a date-ish input cell to DDMMYYYY (Date, Excel serial, or string). */
-function ddmmyyyy(v: FieldValue): string {
-  if (v === undefined || v === '') return '';
-  const coerced = coerceCell({ key: 'd', type: 'date-ddmmyyyy', mandatory: false }, v as never);
-  return coerced instanceof Date ? formatDdmmyyyy(coerced) : str(v);
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+/**
+ * Parse the messy free-text dates accountants type — "04th June 2025", "4 Jun 2025",
+ * "June 4, 2025", "20-06-1987", "20/06/1987" — into DDMMYYYY. Returns '' if unparseable.
+ * (Excel serials / Date objects are handled by `coerceCell` before this is reached.)
+ */
+function looseDate(s: string): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const cleaned = s.replace(/(\d)(st|nd|rd|th)\b/gi, '$1').replace(/,/g, ' ').trim();
+
+  // <day> <month-name> <year>  |  <month-name> <day> <year>
+  const named = /^(\d{1,2})\s+([a-z]{3,})\s+(\d{4})$|^([a-z]{3,})\s+(\d{1,2})\s+(\d{4})$/i.exec(cleaned);
+  if (named) {
+    const day = Number(named[1] ?? named[5]);
+    const mon = MONTHS[(named[2] ?? named[4] ?? '').slice(0, 3).toLowerCase()];
+    const year = Number(named[3] ?? named[6]);
+    if (mon && day >= 1 && day <= 31) return `${pad(day)}${pad(mon)}${year}`;
+  }
+  // DD-MM-YYYY / DD/MM/YYYY (and 2-digit year)
+  const numeric = /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/.exec(cleaned);
+  if (numeric) {
+    const day = Number(numeric[1]);
+    const mon = Number(numeric[2]);
+    let year = Number(numeric[3]);
+    if (year < 100) year += year < 50 ? 2000 : 1900;
+    if (mon >= 1 && mon <= 12 && day >= 1 && day <= 31) return `${pad(day)}${pad(mon)}${year}`;
+  }
+  return '';
 }
 
-/** Whole-rupee string (drop any decimals / scientific noise; "NA" -> blank). */
+/** Parse a date-ish input cell to DDMMYYYY (Date, Excel serial, or free text). */
+function ddmmyyyy(v: FieldValue): string {
+  const s = strNA(v);
+  if (s === '') return '';
+  const coerced = coerceCell({ key: 'd', type: 'date-ddmmyyyy', mandatory: false }, v as never);
+  if (coerced instanceof Date) return formatDdmmyyyy(coerced);
+  return looseDate(s) || s;
+}
+
+/** Whole-rupee string; non-numeric junk ("No", "-", "NA", …) collapses to blank. */
 function rupees(v: FieldValue): string {
   const s = strNA(v);
   if (s === '') return '';
   const n = Number(s.replace(/,/g, ''));
-  return Number.isFinite(n) ? String(Math.round(n)) : s;
+  return Number.isFinite(n) ? String(Math.round(n)) : '';
 }
 
-/** `str`, but treats the accountant placeholder "NA" as blank. */
+/** Placeholders accountants type for an empty cell (treated as blank everywhere). */
+const BLANK_PLACEHOLDER = /^(na|n\.?\/?a|null|nil|none|-+)$/i;
+function isBlankPlaceholder(s: string): boolean {
+  return s === '' || BLANK_PLACEHOLDER.test(s);
+}
+
+/** `str`, but maps the common empty-cell placeholders ("NA", "-", "N/A", …) to blank. */
 function strNA(v: FieldValue): string {
   const s = str(v);
-  return s.toUpperCase() === 'NA' ? '' : s;
+  return isBlankPlaceholder(s) ? '' : s;
 }
 
 /** Zero-pad a small numeric legend to 3 digits (Security Type 001–011); blank for "NA". */
@@ -375,7 +416,7 @@ function splitAddress(raw: FieldValue): {
   pinCode: string;
 } {
   const full = str(raw);
-  if (full === '' || full.toUpperCase() === 'NA') {
+  if (isBlankPlaceholder(full)) {
     return { line1: '', city: '', stateName: '', stateCode: '', pinCode: '' };
   }
   const st = findState(full.toLowerCase());
@@ -628,10 +669,13 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
     });
   }
 
-  // ---- SS (security) — only when a security value/type is present ----
+  // ---- SS (security) — only when a REAL security is present ----
+  // A zero/blank value with an "NA" type/class means "no security" — emit nothing
+  // (some sheets stamp "0"/"NA" rather than leaving the cells empty).
   const secValue = rupees(input.securityValue);
   const secType = pad3Legend(input.securityType);
-  if (secValue !== '' || secType !== '') {
+  const hasSecurity = secType !== '' || (secValue !== '' && secValue !== '0');
+  if (hasSecurity) {
     seeds.push({
       tag: 'SS',
       flag: 6,

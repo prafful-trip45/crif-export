@@ -68,6 +68,11 @@ const CHECKS: Check[] = [
   // reproducible; see the crif-commercial-format skill and COMMERCIAL_FLAT_PIPELINE.md.
   { kind: 'smoke', input: 'commercial_input_1Jul.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'commercial_input_1Jul_OD_Loan.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  // 31 March + 30 June: very messy real sheets ("-" placeholders, "PVT LTD", natural
+  // dates like "04th June 2025", jumbled guarantor cells). Smoke-only — the paired
+  // outputs are hand-curated; the value here is that they now convert with ZERO errors.
+  { kind: 'smoke', input: 'commercial_input_31March.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  { kind: 'smoke', input: 'commercial_input_30June.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
 ];
 
 const err = (r: any) => (r.report?.issues ?? []).filter((i: any) => i.severity === 'error');
