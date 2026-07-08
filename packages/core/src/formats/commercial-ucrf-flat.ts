@@ -72,7 +72,7 @@ const LEGAL_CONSTITUTION = buildLegend([
   { code: '12', num: '2', labels: ['Public Limited', 'Public Ltd', 'Pub Ltd'] },
   { code: '20', num: '3', labels: ['Business Entities Created by Statute'] },
   { code: '30', num: '4', labels: ['Proprietorship', 'Proprietor', 'Sole Proprietorship'] },
-  { code: '40', num: '5', labels: ['Partnership', 'Partnership Firm'] },
+  { code: '40', num: '5', labels: ['Partnership', 'Partnership Firm', 'Partner', 'LLP'] },
   { code: '50', num: '6', labels: ['Trust'] },
   { code: '55', num: '7', labels: ['HUF', 'Hindu Undivided Family'] },
   { code: '60', num: '8', labels: ['Co-operative Society', 'Cooperative Society'] },
@@ -134,7 +134,7 @@ const BUSINESS_CATEGORY = buildLegend([
   { code: '07', num: '7', labels: ['Others'] },
 ]);
 const BUSINESS_INDUSTRY = buildLegend([
-  { code: '01', num: '1', labels: ['Manufacturing'] },
+  { code: '01', num: '1', labels: ['Manufacturing', 'Manfuacture', 'Manufacture'] },
   { code: '02', num: '2', labels: ['Distribution'] },
   { code: '03', num: '3', labels: ['Wholesale'] },
   { code: '04', num: '4', labels: ['Trading'] },
@@ -150,9 +150,34 @@ const BUSINESS_INDUSTRY = buildLegend([
 /** Guarantor Type / Related Type dropdown -> code (1-4, from the sheet legend). */
 const RELATED_TYPE = buildLegend([
   { code: '01', num: '1', labels: ['Business Entity Registered in India', 'Business registred in india', 'Business Entity Registered India'] },
-  { code: '02', num: '2', labels: ['Resident Indian Individual', 'Resident India Individual', 'Individual'] },
+  { code: '02', num: '2', labels: ['Resident Indian Individual', 'Resident India Individual', 'Individual', 'Business Entity/ Indian Individual', 'Business Entity / Indian Individual'] },
   { code: '03', num: '3', labels: ['Business Entity Registered Outside India'] },
   { code: '04', num: '4', labels: ['Foreign/ Non-Resident Indian Individual', 'Foreign Non-Resident Indian Individual'] },
+]);
+
+/** Location Type (8.5) — Borrower Office Location Type. */
+const LOCATION_TYPE = buildLegend([
+  { code: '01', num: '1', labels: ['Registered office address', 'Registered office', 'Registered Office'] },
+  { code: '02', num: '2', labels: ['Branch / Regional Office', 'Branch', 'Regional Office'] },
+  { code: '03', num: '3', labels: ['Warehouse'] },
+  { code: '04', num: '4', labels: ['Plant / Factory Address', 'Plant', 'Factory'] },
+  { code: '05', num: '5', labels: ['Others', 'Other'] },
+  { code: '06', num: '6', labels: ['Mortgage Property address', 'Mortgage Property'] },
+]);
+
+/** Security Type (8.14): accepts the dropdown number or a label -> 3-digit code. */
+const SECURITY_TYPE = buildLegend([
+  { code: '001', num: '1', labels: ['Cash/ Bullion/ Bank Deposits', 'Cash', 'Bullion', 'Bank Deposits'] },
+  { code: '002', num: '2', labels: ['Shares/ Bonds/ Securities', 'Shares', 'Share', 'Bonds', 'Securities'] },
+  { code: '003', num: '3', labels: ['Inventory (Raw Material, WIP and Finished Goods)', 'Inventory'] },
+  { code: '004', num: '4', labels: ['Accounts Receivable'] },
+  { code: '005', num: '5', labels: ['Other Current Assets'] },
+  { code: '006', num: '6', labels: ['Plant & Machinery and Equipment', 'Plant & Machinery', 'Machinery'] },
+  { code: '007', num: '7', labels: ['Land & Buildings', 'Land', 'Building', 'Buildings'] },
+  { code: '008', num: '8', labels: ['Other Fixed Assets'] },
+  { code: '009', num: '9', labels: ['Other Assets'] },
+  { code: '010', num: '10', labels: ['Aggregate of all Current Assets'] },
+  { code: '011', num: '11', labels: ['Aggregate of all Fixed Assets'] },
 ]);
 
 /** Security Classification (8.15): dropdown 1-8 -> CRIF code (collateral is 21-24). */
@@ -219,9 +244,15 @@ function mapLegend(table: Map<string, string>, v: FieldValue): string | undefine
   return table.get(codeKey(v)) ?? table.get(normalize(s)) ?? undefined;
 }
 
-/** Normalize a label for tolerant matching (lowercase, collapse spaces, drop quotes). */
+/** Normalize a label for tolerant matching: lowercase, collapse spaces, drop quotes,
+ * and standardize dash spacing so "Primary-First" == "Primary – First". */
 function normalize(s: string): string {
-  return s.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[“”„‘’]/g, '');
+  return s
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/[“”„‘’]/g, '')
+    .replace(/\s*[-–—]\s*/g, '-');
 }
 
 /** Zero-pad a small numeric legend to 2 digits; blank for non-numeric ("NA"). */
@@ -539,6 +570,17 @@ const COLUMN_HEADERS: Record<string, string> = {
   "Borrower's City": 'borrowerCity',
   "Borrower's State": 'borrowerState',
   "Borrower's PIN": 'borrowerPin',
+  // Expanded template (July 26): extra columns that carry the value/code directly.
+  // "Company Registration Number" / "Date of Incorporation" also repeat for the related
+  // person, but the header matcher breaks ties toward the FIRST (borrower) column, so
+  // these bind to the borrower's.
+  'Company Registration Number': 'companyRegNumber',
+  'Date of Incorporation': 'dateOfIncorporation',
+  'CIN': 'cin',
+  'CLASS OF ACTIVITY': 'classOfActivity',
+  'Borrower Office DUNS Number': 'officeDuns',
+  'STATE CODE': 'borrowerState',
+  'Location Type': 'locationType',
 };
 
 function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): SegmentSeed[] {
@@ -554,9 +596,13 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
       memberBranchCode: DEFAULTS.memberBranchCode,
       borrowerName: str(input.borrowerName),
       pan: str(input.pan),
+      companyRegNumber: strNA(input.companyRegNumber),
+      dateOfIncorporation: ddmmyyyy(input.dateOfIncorporation),
+      cin: strNA(input.cin),
       legalConstitution: mapLegend(LEGAL_CONSTITUTION, input.legalConstitution) ?? '',
       businessCategory: mapLegend(BUSINESS_CATEGORY, input.businessCategory) ?? '',
       businessIndustryType: mapLegend(BUSINESS_INDUSTRY, input.businessIndustryType) ?? '',
+      classOfActivity1: strNA(input.classOfActivity),
     }),
   });
 
@@ -570,7 +616,8 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
     flag: 2,
     values: row({
       _tag: 'AS',
-      officeLocationType: DEFAULTS.officeLocationType,
+      officeLocationType: mapLegend(LOCATION_TYPE, input.locationType) || DEFAULTS.officeLocationType,
+      officeDunsNumber: strNA(input.officeDuns),
       addressLine1: ba.line1,
       cityTown: ba.city,
       district: ba.stateName,
@@ -673,7 +720,7 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
   // A zero/blank value with an "NA" type/class means "no security" — emit nothing
   // (some sheets stamp "0"/"NA" rather than leaving the cells empty).
   const secValue = rupees(input.securityValue);
-  const secType = pad3Legend(input.securityType);
+  const secType = mapLegend(SECURITY_TYPE, input.securityType) ?? pad3Legend(input.securityType);
   const hasSecurity = secType !== '' || (secValue !== '' && secValue !== '0');
   if (hasSecurity) {
     seeds.push({
@@ -737,7 +784,8 @@ function readGuarantorBlocks(rawCells: FlatExplodeContext['rawCells']): Guaranto
       else if (h.startsWith('full name')) blk.fullName = c.value;
       else if (h.includes('date of birth')) blk.dob = c.value;
       else if (h.includes('pan')) blk.pan = c.value;
-      else if (h.startsWith('gender')) blk.gender = c.value;
+      // Gender header varies ("Gender" or "Male 01 Female 02 … Gender") — match anywhere.
+      else if (h.includes('gender')) blk.gender = c.value;
       else if (h.includes('address')) blk.address = c.value;
       else if (h.includes('contact')) blk.contact = c.value;
     }

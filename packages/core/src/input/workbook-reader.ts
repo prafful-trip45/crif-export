@@ -122,6 +122,16 @@ export async function readFlatExplodeWorkbook(
   // when the name doesn't match, rather than failing or guessing the first tab.
   const ws = resolveFlatExplodeSheet(wb, format.flatExplode!);
 
+  // The header row is a HINT, not a fixed position — templates vary (labels on row 10
+  // in the classic Master Sheet, row 1 in the newer expanded one). Detect it by
+  // scanning for the row that best matches the expected header labels; data starts on
+  // the next row. Falls back to the configured position for letter-only formats.
+  const preferredHeaderRow = headerRow ?? firstDataRow - 1;
+  const effHeaderRow = columnHeaders
+    ? detectHeaderRow(ws, Object.keys(columnHeaders), preferredHeaderRow)
+    : preferredHeaderRow;
+  const effFirstDataRow = columnHeaders ? effHeaderRow + 1 : firstDataRow;
+
   const lookups = { creditType: readCreditTypeLookup(wb) };
 
   // Resolve the column->key mapping. Header-driven mapping (match the header row
@@ -136,7 +146,7 @@ export async function readFlatExplodeWorkbook(
     // Fold a header for matching: normalize() + drop spaces around "/" so
     // "Business / Industry Type" and "Business/ Industry Type" compare equal.
     const foldHeader = (s: string): string => normalize(s).replace(/\s*\/\s*/g, '/');
-    const hdrRow = ws.getRow(headerRow ?? firstDataRow - 1);
+    const hdrRow = ws.getRow(effHeaderRow);
     const normHeaders: Array<{ col: number; text: string }> = [];
     for (let c = 1; c <= ws.columnCount; c++) {
       const text = foldHeader(String(cellRaw(hdrRow.getCell(c)) ?? ''));
@@ -170,7 +180,7 @@ export async function readFlatExplodeWorkbook(
   // e.g. multiple guarantor blocks the flat `input` map can't represent).
   const headerTexts = new Map<number, string>();
   {
-    const hdrRow = ws.getRow(headerRow ?? firstDataRow - 1);
+    const hdrRow = ws.getRow(effHeaderRow);
     for (let c = 1; c <= ws.columnCount; c++) {
       const text = String(cellRaw(hdrRow.getCell(c)) ?? '').trim();
       if (text) headerTexts.set(c, text);
@@ -178,7 +188,7 @@ export async function readFlatExplodeWorkbook(
   }
 
   const rows: SegmentRow[] = [];
-  for (let r = firstDataRow; r <= ws.rowCount; r++) {
+  for (let r = effFirstDataRow; r <= ws.rowCount; r++) {
     const wsRow = ws.getRow(r);
     const input: Record<string, FieldValue> = {};
     let any = false;
@@ -399,6 +409,22 @@ function bestHeaderScore(ws: ExcelJS.Worksheet, labels: string[], maxScan = 25):
     if (hits > best) best = hits;
   }
   return best;
+}
+
+/**
+ * The 1-based row that holds the column headers. Scans the top rows and picks the
+ * best label match, biasing to `preferred` on ties so the classic layout is unchanged
+ * while an expanded/shifted template (headers on row 1) is still located. Falls back
+ * to `preferred` when nothing matches.
+ */
+function detectHeaderRow(ws: ExcelJS.Worksheet, labels: string[], preferred: number, maxScan = 25): number {
+  const last = Math.min(ws.rowCount, maxScan);
+  let best = { row: preferred, score: -1 };
+  for (let r = 1; r <= last; r++) {
+    const score = scoreHeaderRow(ws, r, labels);
+    if (score > best.score || (score === best.score && r === preferred)) best = { row: r, score };
+  }
+  return best.score > 0 ? best.row : preferred;
 }
 
 /**

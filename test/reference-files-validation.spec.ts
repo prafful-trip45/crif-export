@@ -104,6 +104,27 @@ describe('reference-files pre-rollout validation', () => {
     }
   }
 
+  // Expanded July-26 template: headers on ROW 1 (not row 10) with extra explicit code
+  // columns. Guards dynamic header-row detection + the new column wiring. (This sheet has
+  // one deliberately-invalid PAN row, so it isn't a clean-smoke file — convert with
+  // allowWarnings and assert the mapping worked.)
+  it('reads the expanded July-26 template (row-1 headers + explicit code columns)', async () => {
+    const buf = readFileSync(ref('Commercial work for July 26.xlsx'));
+    const result: any = await convert(buf, getFormat('commercial-ucrf-flat'), META_DEFAULT, { allowWarnings: true });
+    const out: string[] = (result.outputText ?? '').split('\r\n');
+    const bs = out.filter((l) => l.startsWith('BS'));
+    expect(bs.length).toBe(2); // both borrowers read despite headers on row 1
+    // explicit columns wired: DOI, PAN, company-reg, CIN, constitution/cat/industry, class-of-activity
+    expect(bs[0]).toContain('|01042025|AABCV2179A|5824|U78300KA2024FTC187880|||11|01|01|5046|');
+    // "PARTNER" -> 40, "SMALL" -> 04, "Trading" -> 04
+    expect(bs[1]).toContain('|40|04|04|5046|');
+    // AS: explicit STATE ("Maharashtra" -> 20) + Office DUNS + Location Type ("Registered office" -> 01)
+    expect(out.find((l) => l.startsWith('AS'))).toContain('AS|01|999999999|');
+    expect(out.find((l) => l.startsWith('AS'))).toContain('|Maharashtra|20|');
+    // SS: label security type/class -> codes ("Cash" -> 001, "Primary-First charge" -> 01)
+    expect(out.find((l) => l.startsWith('SS'))).toBe('SS|50000|INR|001|01|||');
+  });
+
   // --- CATCH WRONG INPUTS: synthetic malformed workbooks must be rejected. ---
   describe('wrong inputs are rejected (not silently mis-converted)', () => {
     const buildWb = async (fill: (ws: ExcelJS.Worksheet) => void): Promise<Buffer> => {
