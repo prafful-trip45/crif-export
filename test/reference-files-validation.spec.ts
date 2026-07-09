@@ -68,6 +68,11 @@ const CHECKS: Check[] = [
   // reproducible; see the crif-commercial-format skill and COMMERCIAL_FLAT_PIPELINE.md.
   { kind: 'smoke', input: 'commercial_input_1Jul.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'commercial_input_1Jul_OD_Loan.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  // 31 March + 30 June: very messy real sheets ("-" placeholders, "PVT LTD", natural
+  // dates like "04th June 2025", jumbled guarantor cells). Smoke-only — the paired
+  // outputs are hand-curated; the value here is that they now convert with ZERO errors.
+  { kind: 'smoke', input: 'commercial_input_31March.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  { kind: 'smoke', input: 'commercial_input_30June.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
 ];
 
 const err = (r: any) => (r.report?.issues ?? []).filter((i: any) => i.severity === 'error');
@@ -98,6 +103,53 @@ describe('reference-files pre-rollout validation', () => {
       });
     }
   }
+
+  // Expanded July-26 template: headers on ROW 1 (not row 10) with extra explicit code
+  // columns. Guards dynamic header-row detection + the new column wiring. (This sheet has
+  // one deliberately-invalid PAN row, so it isn't a clean-smoke file — convert with
+  // allowWarnings and assert the mapping worked.)
+  it('reads the expanded July-26 template (row-1 headers + explicit code columns)', async () => {
+    const buf = readFileSync(ref('Commercial work for July 26.xlsx'));
+    const result: any = await convert(buf, getFormat('commercial-ucrf-flat'), META_DEFAULT, { allowWarnings: true });
+    const out: string[] = (result.outputText ?? '').split('\r\n');
+    const bs = out.filter((l) => l.startsWith('BS'));
+    expect(bs.length).toBe(2); // both borrowers read despite headers on row 1
+    // explicit columns wired: DOI, PAN, company-reg, CIN, constitution/cat/industry, class-of-activity
+    // ("MSME" -> 03 Micro per V3.10, "Manufacture" -> 01)
+    expect(bs[0]).toContain('|01042025|AABCV2179A|5824|U78300KA2024FTC187880|||11|03|01|5046|');
+    // "PARTNER" -> 40, "SMALL" -> 04, "Trading" -> 04
+    expect(bs[1]).toContain('|40|04|04|5046|');
+    // AS: explicit STATE ("Maharashtra" -> code 20; District holds the city, not the state)
+    // + Office DUNS (default 999999999) + Location Type ("Registered office" -> 01)
+    expect(out.find((l) => l.startsWith('AS'))).toContain('AS|01|999999999|');
+    expect(out.find((l) => l.startsWith('AS'))).toContain('|20|');
+    // SS: label security type/class -> codes ("Cash" -> 001, "Primary-First charge" -> 01)
+    expect(out.find((l) => l.startsWith('SS'))).toBe('SS|50000|INR|001|01|||');
+  });
+
+  // V3.10 profile vs the POC-verified 9-July golden. Reproduces it exactly except two
+  // known non-reproducible artifacts: an input typo (guarantor name "Manjula" vs the
+  // golden's "Manjula HY") and the golden's AS Line-1 dropping "Girinagar" (its own RS/GS
+  // keep it). Guards the V3.10 conventions (ME info-type, MS prefix, unpadded GS relType,
+  // drawing-power as-entered, blank wilful-date, District=city, Office DUNS, MSME->03).
+  it('V3.10 profile reproduces the 9-July golden (modulo input typo + AS Line-1 artifact)', async () => {
+    const buf = readFileSync(ref('commercial_input_9July_Final.xlsx'));
+    const result: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), {
+      memberId: 'NB51840001',
+      reportingDate: new Date(Date.UTC(2026, 5, 30)), // 30062026
+      creationDate: new Date(Date.UTC(2026, 6, 9)), // 09072026
+    });
+    expect(err(result)).toEqual([]);
+    const out: string[] = (result.outputText ?? '').split('\r\n');
+    expect(out[0]).toBe('HD|NB51840001||09072026|30062026|ME|'); // ME info-type
+    expect(out[1]).toBe('BS|HO||MLT CORPORATE SOLUTIONS PVT LTD||||AAQCM0381D|||||11|03|06|60204||||||||||||');
+    // District = city (Bengaluru), Office DUNS default, state code 16.
+    expect(out[2]).toBe('AS|01|999999999|[#7, Old No. 15/1, 80 ft Road, 2nd Phase, Girinagar|||Bengaluru|Bengaluru|16|560085|079|9900737072||||||');
+    expect(out[4]).toBe('CR|1947555888||04062025|3500000|INR|0410||01|0|1922993||||0001||0|||||||||01|||||||||0||00|||||||'); // drawing-power 0, wilful blank
+    // One GS, unpadded relType (2), upper-case prefix (MS). Name reflects the input cell.
+    expect(out[5]).toBe('GS|999999999|2||||MS|Manjula|02|||20061987|BAEPB5560K|||||||||||[#7, Old No. 15/1, 80 ft Road, 2nd Phase, Girinagar|||Bengaluru|Bengaluru|16|560085|079|||||||');
+    expect(out[6]).toBe('TS|1|1|');
+  });
 
   // --- CATCH WRONG INPUTS: synthetic malformed workbooks must be rejected. ---
   describe('wrong inputs are rejected (not silently mis-converted)', () => {

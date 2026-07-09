@@ -101,6 +101,7 @@ export type FormatId =
   | 'consumer-ucrf12-flat'
   | 'commercial-ucrf'
   | 'commercial-ucrf-flat'
+  | 'commercial-ucrf-flat-v310'
   | 'mfi-cdf';
 
 export interface FormatSpec {

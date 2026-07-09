@@ -33,6 +33,7 @@ import { STATE_CODE } from './enums/commercial-enums.js';
 const DEFAULTS = {
   memberBranchCode: 'HO', // BS
   officeLocationType: '01', // AS
+  officeDuns: '999999999', // AS — Borrower Office DUNS is always 999999999
   countryCode: '079', // AS / RS phone area / country
   relationshipDuns: '999999999', // RS
   currencyCode: 'INR', // CR
@@ -68,17 +69,18 @@ function buildLegend(entries: LegendEntry[]): Map<string, string> {
  * See the `crif-commercial-format` skill.
  */
 const LEGAL_CONSTITUTION = buildLegend([
-  { code: '11', num: '1', labels: ['Private Limited'] },
-  { code: '12', num: '2', labels: ['Public Limited'] },
+  { code: '11', num: '1', labels: ['Private Limited', 'Pvt Ltd', 'Pvt. Ltd.', 'Private Ltd', 'Pvt Limited'] },
+  { code: '12', num: '2', labels: ['Public Limited', 'Public Ltd', 'Pub Ltd'] },
   { code: '20', num: '3', labels: ['Business Entities Created by Statute'] },
-  { code: '30', num: '4', labels: ['Proprietorship'] },
-  { code: '40', num: '5', labels: ['Partnership'] },
+  { code: '30', num: '4', labels: ['Proprietorship', 'Proprietor', 'Sole Proprietorship'] },
+  { code: '40', num: '5', labels: ['Partnership', 'Partnership Firm', 'Partner', 'LLP'] },
   { code: '50', num: '6', labels: ['Trust'] },
   { code: '55', num: '7', labels: ['HUF', 'Hindu Undivided Family'] },
   { code: '60', num: '8', labels: ['Co-operative Society', 'Cooperative Society'] },
   { code: '70', num: '9', labels: ['Association of Persons'] },
   { code: '80', num: '10', labels: ['Government'] },
-  { code: '85', num: '11', labels: ['Self Help Group'] },
+  { code: '85', num: '11', labels: ['Self Help Group', 'SHG'] },
+  { code: '90', num: '12', labels: ['Individual'] }, // V3.10 addition
 ]);
 
 /**
@@ -93,7 +95,7 @@ const RELATIONSHIP_TYPE = buildLegend([
   { code: '30', num: '5', labels: ['Partner'] },
   { code: '40', num: '6', labels: ['Trustee'] },
   { code: '51', num: '7', labels: ['Promoter Director'] },
-  { code: '52', num: '8', labels: ['Nominee Director'] },
+  { code: '52', num: '8', labels: ['Nominee Director', 'Nominee'] },
   { code: '53', num: '9', labels: ['Independent Director'] },
   { code: '54', num: '10', labels: ['Director - Since Resigned', 'Director Since Resigned'] },
   { code: '55', num: '11', labels: ['Individual Member of SHG'] },
@@ -125,16 +127,19 @@ const ASSET_CLASSIFICATION = buildLegend([
 
 /** Business Category (8.3) & Business/Industry Type (8.4): code = dropdown position. */
 const BUSINESS_CATEGORY = buildLegend([
-  { code: '01', num: '1', labels: ['MSME'] },
-  { code: '02', num: '2', labels: ['SME'] },
-  { code: '03', num: '3', labels: ['Micro'] },
-  { code: '04', num: '4', labels: ['Small'] },
+  // V3.10 (8.2) dropped the old 01 MSME / 02 SME codes and added 08 Retail / 09 Agri.
+  // Legacy sheets still type "MSME"/"SME": per the client, MSME now maps to Micro (03);
+  // SME is treated as Small (04) — confirm if that differs.
+  { code: '03', num: '3', labels: ['Micro', 'MSME'] },
+  { code: '04', num: '4', labels: ['Small', 'SME'] },
   { code: '05', num: '5', labels: ['Medium'] },
   { code: '06', num: '6', labels: ['Large'] },
   { code: '07', num: '7', labels: ['Others'] },
+  { code: '08', num: '8', labels: ['Retail'] },
+  { code: '09', num: '9', labels: ['Agri', 'Agriculture'] },
 ]);
 const BUSINESS_INDUSTRY = buildLegend([
-  { code: '01', num: '1', labels: ['Manufacturing'] },
+  { code: '01', num: '1', labels: ['Manufacturing', 'Manfuacture', 'Manufacture'] },
   { code: '02', num: '2', labels: ['Distribution'] },
   { code: '03', num: '3', labels: ['Wholesale'] },
   { code: '04', num: '4', labels: ['Trading'] },
@@ -149,10 +154,35 @@ const BUSINESS_INDUSTRY = buildLegend([
 
 /** Guarantor Type / Related Type dropdown -> code (1-4, from the sheet legend). */
 const RELATED_TYPE = buildLegend([
-  { code: '01', num: '1', labels: ['Business Entity Registered in India'] },
-  { code: '02', num: '2', labels: ['Resident Indian Individual'] },
+  { code: '01', num: '1', labels: ['Business Entity Registered in India', 'Business registred in india', 'Business Entity Registered India'] },
+  { code: '02', num: '2', labels: ['Resident Indian Individual', 'Resident India Individual', 'Individual', 'Business Entity/ Indian Individual', 'Business Entity / Indian Individual'] },
   { code: '03', num: '3', labels: ['Business Entity Registered Outside India'] },
   { code: '04', num: '4', labels: ['Foreign/ Non-Resident Indian Individual', 'Foreign Non-Resident Indian Individual'] },
+]);
+
+/** Location Type (8.5) — Borrower Office Location Type. */
+const LOCATION_TYPE = buildLegend([
+  { code: '01', num: '1', labels: ['Registered office address', 'Registered office', 'Registered Office'] },
+  { code: '02', num: '2', labels: ['Branch / Regional Office', 'Branch', 'Regional Office'] },
+  { code: '03', num: '3', labels: ['Warehouse'] },
+  { code: '04', num: '4', labels: ['Plant / Factory Address', 'Plant', 'Factory'] },
+  { code: '05', num: '5', labels: ['Others', 'Other'] },
+  { code: '06', num: '6', labels: ['Mortgage Property address', 'Mortgage Property'] },
+]);
+
+/** Security Type (8.14): accepts the dropdown number or a label -> 3-digit code. */
+const SECURITY_TYPE = buildLegend([
+  { code: '001', num: '1', labels: ['Cash/ Bullion/ Bank Deposits', 'Cash', 'Bullion', 'Bank Deposits'] },
+  { code: '002', num: '2', labels: ['Shares/ Bonds/ Securities', 'Shares', 'Share', 'Bonds', 'Securities'] },
+  { code: '003', num: '3', labels: ['Inventory (Raw Material, WIP and Finished Goods)', 'Inventory'] },
+  { code: '004', num: '4', labels: ['Accounts Receivable'] },
+  { code: '005', num: '5', labels: ['Other Current Assets'] },
+  { code: '006', num: '6', labels: ['Plant & Machinery and Equipment', 'Plant & Machinery', 'Machinery'] },
+  { code: '007', num: '7', labels: ['Land & Buildings', 'Land', 'Building', 'Buildings'] },
+  { code: '008', num: '8', labels: ['Other Fixed Assets'] },
+  { code: '009', num: '9', labels: ['Other Assets'] },
+  { code: '010', num: '10', labels: ['Aggregate of all Current Assets'] },
+  { code: '011', num: '11', labels: ['Aggregate of all Fixed Assets'] },
 ]);
 
 /** Security Classification (8.15): dropdown 1-8 -> CRIF code (collateral is 21-24). */
@@ -195,11 +225,28 @@ const REPAYMENT_FREQUENCY = buildLegend([
   { code: '08', num: '8', labels: ['Others'] },
 ]);
 
-/** Gender text -> CRIF code + courtesy prefix (RS / GS individuals). Title-case is the
- * canonical form; some hand-made goldens upper-case the RS prefix (`MR`/`MRS`) — that
- * is a source artifact we do not reproduce. */
+/** Gender text -> CRIF code + courtesy prefix (RS / GS individuals). V3.9 uses title-case
+ * (`Mr`/`Ms`); V3.10 upper-cases it (`MR`/`MS`) — selected via FlatOpts.prefixUpper. */
 const GENDER_CODE: Record<string, string> = { male: '01', female: '02', transgender: '03' };
 const GENDER_PREFIX: Record<string, string> = { male: 'Mr', female: 'Ms', transgender: '' };
+const GENDER_PREFIX_UPPER: Record<string, string> = { male: 'MR', female: 'MS', transgender: '' };
+
+/**
+ * Per-version behaviour toggles. V3.9 (the legacy accountant convention) vs V3.10 (the
+ * current bureau convention seen in the POC-verified 9-July file).
+ */
+interface FlatOpts {
+  /** RS/GS courtesy prefix: upper-case (MR/MS) in V3.10, title-case (Mr/Ms) in V3.9. */
+  prefixUpper: boolean;
+  /** GS Related-Type: zero-padded ("02") in V3.9, bare ("2") in V3.10. */
+  gsRelTypePadded: boolean;
+  /** Drawing Power falls back to the Sanctioned Amount when blank (V3.9) or stays 0 (V3.10). */
+  drawingPowerFallback: boolean;
+  /** Wilful-default DATE slot: literal "0" (V3.9) or blank (V3.10). */
+  wilfulDateZero: boolean;
+}
+const V39_OPTS: FlatOpts = { prefixUpper: false, gsRelTypePadded: true, drawingPowerFallback: true, wilfulDateZero: true };
+const V310_OPTS: FlatOpts = { prefixUpper: true, gsRelTypePadded: false, drawingPowerFallback: false, wilfulDateZero: false };
 
 /* ---------- small value helpers ---------- */
 
@@ -219,9 +266,15 @@ function mapLegend(table: Map<string, string>, v: FieldValue): string | undefine
   return table.get(codeKey(v)) ?? table.get(normalize(s)) ?? undefined;
 }
 
-/** Normalize a label for tolerant matching (lowercase, collapse spaces, drop quotes). */
+/** Normalize a label for tolerant matching: lowercase, collapse spaces, drop quotes,
+ * and standardize dash spacing so "Primary-First" == "Primary – First". */
 function normalize(s: string): string {
-  return s.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[“”„‘’]/g, '');
+  return s
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/[“”„‘’]/g, '')
+    .replace(/\s*[-–—]\s*/g, '-');
 }
 
 /** Zero-pad a small numeric legend to 2 digits; blank for non-numeric ("NA"). */
@@ -230,31 +283,78 @@ function pad2Legend(v: FieldValue): string {
   return /^\d+$/.test(s) ? s.padStart(2, '0') : '';
 }
 
-/** Parse a date-ish input cell to DDMMYYYY (Date, Excel serial, or string). */
-function ddmmyyyy(v: FieldValue): string {
-  if (v === undefined || v === '') return '';
-  const coerced = coerceCell({ key: 'd', type: 'date-ddmmyyyy', mandatory: false }, v as never);
-  return coerced instanceof Date ? formatDdmmyyyy(coerced) : str(v);
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+/**
+ * Parse the messy free-text dates accountants type — "04th June 2025", "4 Jun 2025",
+ * "June 4, 2025", "20-06-1987", "20/06/1987" — into DDMMYYYY. Returns '' if unparseable.
+ * (Excel serials / Date objects are handled by `coerceCell` before this is reached.)
+ */
+function looseDate(s: string): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const cleaned = s.replace(/(\d)(st|nd|rd|th)\b/gi, '$1').replace(/,/g, ' ').trim();
+
+  // <day> <month-name> <year>  |  <month-name> <day> <year>
+  const named = /^(\d{1,2})\s+([a-z]{3,})\s+(\d{4})$|^([a-z]{3,})\s+(\d{1,2})\s+(\d{4})$/i.exec(cleaned);
+  if (named) {
+    const day = Number(named[1] ?? named[5]);
+    const mon = MONTHS[(named[2] ?? named[4] ?? '').slice(0, 3).toLowerCase()];
+    const year = Number(named[3] ?? named[6]);
+    if (mon && day >= 1 && day <= 31) return `${pad(day)}${pad(mon)}${year}`;
+  }
+  // DD-MM-YYYY / DD/MM/YYYY (and 2-digit year)
+  const numeric = /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/.exec(cleaned);
+  if (numeric) {
+    const day = Number(numeric[1]);
+    const mon = Number(numeric[2]);
+    let year = Number(numeric[3]);
+    if (year < 100) year += year < 50 ? 2000 : 1900;
+    if (mon >= 1 && mon <= 12 && day >= 1 && day <= 31) return `${pad(day)}${pad(mon)}${year}`;
+  }
+  return '';
 }
 
-/** Whole-rupee string (drop any decimals / scientific noise; "NA" -> blank). */
+/** Parse a date-ish input cell to DDMMYYYY (Date, Excel serial, or free text). */
+function ddmmyyyy(v: FieldValue): string {
+  const s = strNA(v);
+  if (s === '') return '';
+  const coerced = coerceCell({ key: 'd', type: 'date-ddmmyyyy', mandatory: false }, v as never);
+  if (coerced instanceof Date) return formatDdmmyyyy(coerced);
+  return looseDate(s) || s;
+}
+
+/** Whole-rupee string; non-numeric junk ("No", "-", "NA", …) collapses to blank. */
 function rupees(v: FieldValue): string {
   const s = strNA(v);
   if (s === '') return '';
   const n = Number(s.replace(/,/g, ''));
-  return Number.isFinite(n) ? String(Math.round(n)) : s;
+  return Number.isFinite(n) ? String(Math.round(n)) : '';
 }
 
-/** `str`, but treats the accountant placeholder "NA" as blank. */
+/** Placeholders accountants type for an empty cell (treated as blank everywhere). */
+const BLANK_PLACEHOLDER = /^(na|n\.?\/?a|null|nil|none|-+)$/i;
+function isBlankPlaceholder(s: string): boolean {
+  return s === '' || BLANK_PLACEHOLDER.test(s);
+}
+
+/** `str`, but maps the common empty-cell placeholders ("NA", "-", "N/A", …) to blank. */
 function strNA(v: FieldValue): string {
   const s = str(v);
-  return s.toUpperCase() === 'NA' ? '' : s;
+  return isBlankPlaceholder(s) ? '' : s;
 }
 
 /** Zero-pad a small numeric legend to 3 digits (Security Type 001–011); blank for "NA". */
 function pad3Legend(v: FieldValue): string {
   const s = codeKey(v);
   return /^\d+$/.test(s) ? s.padStart(3, '0') : '';
+}
+
+/** GS Related-Type: V3.9 keeps the padded code ("02"); V3.10 drops the pad ("2"). */
+function gsRelType(code: string, opts: FlatOpts): string {
+  if (code === '' || opts.gsRelTypePadded || !/^\d+$/.test(code)) return code;
+  return String(Number(code));
 }
 
 /**
@@ -375,7 +475,7 @@ function splitAddress(raw: FieldValue): {
   pinCode: string;
 } {
   const full = str(raw);
-  if (full === '' || full.toUpperCase() === 'NA') {
+  if (isBlankPlaceholder(full)) {
     return { line1: '', city: '', stateName: '', stateCode: '', pinCode: '' };
   }
   const st = findState(full.toLowerCase());
@@ -498,11 +598,27 @@ const COLUMN_HEADERS: Record<string, string> = {
   "Borrower's City": 'borrowerCity',
   "Borrower's State": 'borrowerState',
   "Borrower's PIN": 'borrowerPin',
+  // Expanded template (July 26): extra columns that carry the value/code directly.
+  // "Company Registration Number" / "Date of Incorporation" also repeat for the related
+  // person, but the header matcher breaks ties toward the FIRST (borrower) column, so
+  // these bind to the borrower's.
+  'Company Registration Number': 'companyRegNumber',
+  'Date of Incorporation': 'dateOfIncorporation',
+  'CIN': 'cin',
+  'CLASS OF ACTIVITY': 'classOfActivity',
+  'Borrower Office DUNS Number': 'officeDuns',
+  'STATE CODE': 'borrowerState',
+  'Location Type': 'locationType',
 };
 
-function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): SegmentSeed[] {
+function explode(
+  input: Record<string, FieldValue>,
+  ctx: FlatExplodeContext,
+  opts: FlatOpts = V39_OPTS,
+): SegmentSeed[] {
   const seeds: SegmentSeed[] = [];
   const issues: SegmentSeed['issues'] = [];
+  const prefixMap = opts.prefixUpper ? GENDER_PREFIX_UPPER : GENDER_PREFIX;
 
   // ---- BS (borrower) ----
   seeds.push({
@@ -513,9 +629,13 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
       memberBranchCode: DEFAULTS.memberBranchCode,
       borrowerName: str(input.borrowerName),
       pan: str(input.pan),
+      companyRegNumber: strNA(input.companyRegNumber),
+      dateOfIncorporation: ddmmyyyy(input.dateOfIncorporation),
+      cin: strNA(input.cin),
       legalConstitution: mapLegend(LEGAL_CONSTITUTION, input.legalConstitution) ?? '',
       businessCategory: mapLegend(BUSINESS_CATEGORY, input.businessCategory) ?? '',
       businessIndustryType: mapLegend(BUSINESS_INDUSTRY, input.businessIndustryType) ?? '',
+      classOfActivity1: strNA(input.classOfActivity),
     }),
   });
 
@@ -529,10 +649,13 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
     flag: 2,
     values: row({
       _tag: 'AS',
-      officeLocationType: DEFAULTS.officeLocationType,
+      officeLocationType: mapLegend(LOCATION_TYPE, input.locationType) || DEFAULTS.officeLocationType,
+      officeDunsNumber: strNA(input.officeDuns) || DEFAULTS.officeDuns,
       addressLine1: ba.line1,
       cityTown: ba.city,
-      district: ba.stateName,
+      // District carries the CITY, not the state — a state name (e.g. "Karnataka")
+      // only drives the 2-digit State code, it never goes in District.
+      district: ba.city,
       stateCode: ba.stateCode,
       pinCode: ba.pinCode,
       country: DEFAULTS.countryCode,
@@ -552,14 +675,14 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
         relationshipDuns: DEFAULTS.relationshipDuns,
         relatedType: '2', // Resident Indian Individual (individual related person)
         relationship: mapLegend(RELATIONSHIP_TYPE, input.relationshipType) ?? '',
-        namePrefix: GENDER_PREFIX[g] ?? '',
+        namePrefix: prefixMap[g] ?? '',
         fullName: strNA(input.relatedName),
         gender: GENDER_CODE[g] ?? '',
         dateOfBirth: ddmmyyyy(input.relatedDob),
         rsPan: strNA(input.relatedPan),
         rsAddressLine1: ra.line1,
         rsCity: ra.city,
-        rsDistrict: ra.stateName,
+        rsDistrict: ra.city,
         rsStateCode: ra.stateCode,
         rsPinCode: ra.pinCode,
         rsCountry: DEFAULTS.countryCode,
@@ -583,7 +706,9 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
       repaymentFrequency: mapLegend(REPAYMENT_FREQUENCY, input.repaymentFrequency) ?? '',
       // Drawing Power: use the input value, else fall back to the sanctioned amount
       // (the accountant convention seen in the sample).
-      drawingPower: rupees(input.drawingPower) || rupees(input.sanctionedAmount),
+      drawingPower: opts.drawingPowerFallback
+        ? rupees(input.drawingPower) || rupees(input.sanctionedAmount)
+        : rupees(input.drawingPower) || '0',
       currentBalance: rupees(input.currentBalance),
       assetClassification: mapLegend(ASSET_CLASSIFICATION, input.assetClassification) ?? '',
       amountOverdue: rupees(input.amountOverdue) || '0',
@@ -591,7 +716,7 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
       // Wilful-default status 0 = No; the DATE slot is likewise a literal "0" (both
       // goldens do this — FLAT_BODY relaxes that field to string); suit-filed 00 = none.
       wilfulDefaultStatus: wilfulCode(input.wilfulDefault) || '0',
-      wilfulDefaultDate: '0',
+      wilfulDefaultDate: opts.wilfulDateZero ? '0' : '',
       suitFiledStatus: '00',
     }),
   });
@@ -611,15 +736,15 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
       values: row({
         _tag: 'GS',
         gsDuns: DEFAULTS.relationshipDuns,
-        gsRelatedType: mapLegend(RELATED_TYPE, gtor.type) ?? '',
-        gsNamePrefix: GENDER_PREFIX[g] ?? '',
+        gsRelatedType: gsRelType(mapLegend(RELATED_TYPE, gtor.type) ?? '', opts),
+        gsNamePrefix: prefixMap[g] ?? '',
         gsFullName: name,
         gsGender: GENDER_CODE[g] ?? '',
         gsDateOfBirth: ddmmyyyy(gtor.dob),
         gsPan: strNA(gtor.pan),
         gsAddressLine1: ga.line1,
         gsCity: ga.city,
-        gsDistrict: ga.stateName,
+        gsDistrict: ga.city,
         gsStateCode: ga.stateCode,
         gsPinCode: ga.pinCode,
         gsCountry: DEFAULTS.countryCode,
@@ -628,10 +753,13 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
     });
   }
 
-  // ---- SS (security) — only when a security value/type is present ----
+  // ---- SS (security) — only when a REAL security is present ----
+  // A zero/blank value with an "NA" type/class means "no security" — emit nothing
+  // (some sheets stamp "0"/"NA" rather than leaving the cells empty).
   const secValue = rupees(input.securityValue);
-  const secType = pad3Legend(input.securityType);
-  if (secValue !== '' || secType !== '') {
+  const secType = mapLegend(SECURITY_TYPE, input.securityType) ?? pad3Legend(input.securityType);
+  const hasSecurity = secType !== '' || (secValue !== '' && secValue !== '0');
+  if (hasSecurity) {
     seeds.push({
       tag: 'SS',
       flag: 6,
@@ -693,7 +821,8 @@ function readGuarantorBlocks(rawCells: FlatExplodeContext['rawCells']): Guaranto
       else if (h.startsWith('full name')) blk.fullName = c.value;
       else if (h.includes('date of birth')) blk.dob = c.value;
       else if (h.includes('pan')) blk.pan = c.value;
-      else if (h.startsWith('gender')) blk.gender = c.value;
+      // Gender header varies ("Gender" or "Male 01 Female 02 … Gender") — match anywhere.
+      else if (h.includes('gender')) blk.gender = c.value;
       else if (h.includes('address')) blk.address = c.value;
       else if (h.includes('contact')) blk.contact = c.value;
     }
@@ -777,5 +906,27 @@ export const commercialUcrfFlat: FormatSpec = {
     // Accountant fills these top-of-sheet cells; a non-blank value overrides the
     // matching CLI flag. A5/A6/A7 hold the labels; B5/B6/B7 the values.
     headerCells: { B5: 'memberId', B6: 'reportingDate', B7: 'creationDate' },
+  },
+};
+
+/**
+ * Commercial UCRF **V3.10** profile — same mapping engine as the V3.9 flat format, with
+ * the current bureau conventions: HD Information Type = `ME`, upper-case RS/GS prefixes,
+ * unpadded GS Related-Type, Drawing Power as-entered (no sanctioned-amount fallback), and
+ * a blank wilful-default date. Verified against `commercial_output_9July_Final.txt`.
+ */
+export const commercialUcrfFlatV310: FormatSpec = {
+  ...commercialUcrfFlat,
+  id: 'commercial-ucrf-flat-v310',
+  label: 'Commercial UCRF V3.10',
+  version: '3.10',
+  // Default the header Information Type to "ME" (Month End); a meta value still wins.
+  buildHeaderRow: (meta) => ({
+    ...commercialUcrfFlat.buildHeaderRow!(meta),
+    infoType: (meta.infoType as string) ?? 'ME',
+  }),
+  flatExplode: {
+    ...commercialUcrfFlat.flatExplode!,
+    explode: (input, ctx) => explode(input, ctx, V310_OPTS),
   },
 };
