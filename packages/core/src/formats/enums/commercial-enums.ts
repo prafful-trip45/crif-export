@@ -12,10 +12,16 @@ export const CURRENCY = {
   GBP: 'Pound Sterling',
 } as const;
 
-/** Information type on the header (01 = full/standard submission). */
+/** Information type on the header. V3.9 used 01/02; V3.10 (§7.1) uses the reporting-cycle
+ * codes ME (Month End), W1/W2/W3 (weekly), DL (daily). */
 export const INFO_TYPE = {
   '01': 'Standard submission',
   '02': 'Correction',
+  ME: 'Month End',
+  W1: 'Week 1',
+  W2: 'Week 2',
+  W3: 'Week 3',
+  DL: 'Daily',
 } as const;
 
 /**
@@ -34,7 +40,7 @@ export const STATE_CODE = {
   '05': 'Bihar',
   '06': 'Chandigarh',
   '07': 'Chhattisgarh',
-  '08': 'Dadra and Nagar Haveli',
+  '08': 'Dadra and Nagar Haveli and Daman and Diu', // V3.10 combines 08 & 09 (both still accepted)
   '09': 'Daman and Diu',
   '10': 'Goa',
   '11': 'Gujarat',
@@ -63,4 +69,6 @@ export const STATE_CODE = {
   '34': 'Uttarakhand',
   '35': 'West Bengal',
   '36': 'Telangana',
+  '37': 'Ladakh', // V3.10 addition
+  '77': 'Foreign address', // V3.10 addition
 } as const;

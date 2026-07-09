@@ -33,6 +33,7 @@ import { STATE_CODE } from './enums/commercial-enums.js';
 const DEFAULTS = {
   memberBranchCode: 'HO', // BS
   officeLocationType: '01', // AS
+  officeDuns: '999999999', // AS — Borrower Office DUNS is always 999999999
   countryCode: '079', // AS / RS phone area / country
   relationshipDuns: '999999999', // RS
   currencyCode: 'INR', // CR
@@ -79,6 +80,7 @@ const LEGAL_CONSTITUTION = buildLegend([
   { code: '70', num: '9', labels: ['Association of Persons'] },
   { code: '80', num: '10', labels: ['Government'] },
   { code: '85', num: '11', labels: ['Self Help Group', 'SHG'] },
+  { code: '90', num: '12', labels: ['Individual'] }, // V3.10 addition
 ]);
 
 /**
@@ -125,13 +127,16 @@ const ASSET_CLASSIFICATION = buildLegend([
 
 /** Business Category (8.3) & Business/Industry Type (8.4): code = dropdown position. */
 const BUSINESS_CATEGORY = buildLegend([
-  { code: '01', num: '1', labels: ['MSME'] },
-  { code: '02', num: '2', labels: ['SME'] },
-  { code: '03', num: '3', labels: ['Micro'] },
-  { code: '04', num: '4', labels: ['Small'] },
+  // V3.10 (8.2) dropped the old 01 MSME / 02 SME codes and added 08 Retail / 09 Agri.
+  // Legacy sheets still type "MSME"/"SME": per the client, MSME now maps to Micro (03);
+  // SME is treated as Small (04) — confirm if that differs.
+  { code: '03', num: '3', labels: ['Micro', 'MSME'] },
+  { code: '04', num: '4', labels: ['Small', 'SME'] },
   { code: '05', num: '5', labels: ['Medium'] },
   { code: '06', num: '6', labels: ['Large'] },
   { code: '07', num: '7', labels: ['Others'] },
+  { code: '08', num: '8', labels: ['Retail'] },
+  { code: '09', num: '9', labels: ['Agri', 'Agriculture'] },
 ]);
 const BUSINESS_INDUSTRY = buildLegend([
   { code: '01', num: '1', labels: ['Manufacturing', 'Manfuacture', 'Manufacture'] },
@@ -220,11 +225,28 @@ const REPAYMENT_FREQUENCY = buildLegend([
   { code: '08', num: '8', labels: ['Others'] },
 ]);
 
-/** Gender text -> CRIF code + courtesy prefix (RS / GS individuals). Title-case is the
- * canonical form; some hand-made goldens upper-case the RS prefix (`MR`/`MRS`) — that
- * is a source artifact we do not reproduce. */
+/** Gender text -> CRIF code + courtesy prefix (RS / GS individuals). V3.9 uses title-case
+ * (`Mr`/`Ms`); V3.10 upper-cases it (`MR`/`MS`) — selected via FlatOpts.prefixUpper. */
 const GENDER_CODE: Record<string, string> = { male: '01', female: '02', transgender: '03' };
 const GENDER_PREFIX: Record<string, string> = { male: 'Mr', female: 'Ms', transgender: '' };
+const GENDER_PREFIX_UPPER: Record<string, string> = { male: 'MR', female: 'MS', transgender: '' };
+
+/**
+ * Per-version behaviour toggles. V3.9 (the legacy accountant convention) vs V3.10 (the
+ * current bureau convention seen in the POC-verified 9-July file).
+ */
+interface FlatOpts {
+  /** RS/GS courtesy prefix: upper-case (MR/MS) in V3.10, title-case (Mr/Ms) in V3.9. */
+  prefixUpper: boolean;
+  /** GS Related-Type: zero-padded ("02") in V3.9, bare ("2") in V3.10. */
+  gsRelTypePadded: boolean;
+  /** Drawing Power falls back to the Sanctioned Amount when blank (V3.9) or stays 0 (V3.10). */
+  drawingPowerFallback: boolean;
+  /** Wilful-default DATE slot: literal "0" (V3.9) or blank (V3.10). */
+  wilfulDateZero: boolean;
+}
+const V39_OPTS: FlatOpts = { prefixUpper: false, gsRelTypePadded: true, drawingPowerFallback: true, wilfulDateZero: true };
+const V310_OPTS: FlatOpts = { prefixUpper: true, gsRelTypePadded: false, drawingPowerFallback: false, wilfulDateZero: false };
 
 /* ---------- small value helpers ---------- */
 
@@ -327,6 +349,12 @@ function strNA(v: FieldValue): string {
 function pad3Legend(v: FieldValue): string {
   const s = codeKey(v);
   return /^\d+$/.test(s) ? s.padStart(3, '0') : '';
+}
+
+/** GS Related-Type: V3.9 keeps the padded code ("02"); V3.10 drops the pad ("2"). */
+function gsRelType(code: string, opts: FlatOpts): string {
+  if (code === '' || opts.gsRelTypePadded || !/^\d+$/.test(code)) return code;
+  return String(Number(code));
 }
 
 /**
@@ -583,9 +611,14 @@ const COLUMN_HEADERS: Record<string, string> = {
   'Location Type': 'locationType',
 };
 
-function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): SegmentSeed[] {
+function explode(
+  input: Record<string, FieldValue>,
+  ctx: FlatExplodeContext,
+  opts: FlatOpts = V39_OPTS,
+): SegmentSeed[] {
   const seeds: SegmentSeed[] = [];
   const issues: SegmentSeed['issues'] = [];
+  const prefixMap = opts.prefixUpper ? GENDER_PREFIX_UPPER : GENDER_PREFIX;
 
   // ---- BS (borrower) ----
   seeds.push({
@@ -617,10 +650,12 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
     values: row({
       _tag: 'AS',
       officeLocationType: mapLegend(LOCATION_TYPE, input.locationType) || DEFAULTS.officeLocationType,
-      officeDunsNumber: strNA(input.officeDuns),
+      officeDunsNumber: strNA(input.officeDuns) || DEFAULTS.officeDuns,
       addressLine1: ba.line1,
       cityTown: ba.city,
-      district: ba.stateName,
+      // District carries the CITY, not the state — a state name (e.g. "Karnataka")
+      // only drives the 2-digit State code, it never goes in District.
+      district: ba.city,
       stateCode: ba.stateCode,
       pinCode: ba.pinCode,
       country: DEFAULTS.countryCode,
@@ -640,14 +675,14 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
         relationshipDuns: DEFAULTS.relationshipDuns,
         relatedType: '2', // Resident Indian Individual (individual related person)
         relationship: mapLegend(RELATIONSHIP_TYPE, input.relationshipType) ?? '',
-        namePrefix: GENDER_PREFIX[g] ?? '',
+        namePrefix: prefixMap[g] ?? '',
         fullName: strNA(input.relatedName),
         gender: GENDER_CODE[g] ?? '',
         dateOfBirth: ddmmyyyy(input.relatedDob),
         rsPan: strNA(input.relatedPan),
         rsAddressLine1: ra.line1,
         rsCity: ra.city,
-        rsDistrict: ra.stateName,
+        rsDistrict: ra.city,
         rsStateCode: ra.stateCode,
         rsPinCode: ra.pinCode,
         rsCountry: DEFAULTS.countryCode,
@@ -671,7 +706,9 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
       repaymentFrequency: mapLegend(REPAYMENT_FREQUENCY, input.repaymentFrequency) ?? '',
       // Drawing Power: use the input value, else fall back to the sanctioned amount
       // (the accountant convention seen in the sample).
-      drawingPower: rupees(input.drawingPower) || rupees(input.sanctionedAmount),
+      drawingPower: opts.drawingPowerFallback
+        ? rupees(input.drawingPower) || rupees(input.sanctionedAmount)
+        : rupees(input.drawingPower) || '0',
       currentBalance: rupees(input.currentBalance),
       assetClassification: mapLegend(ASSET_CLASSIFICATION, input.assetClassification) ?? '',
       amountOverdue: rupees(input.amountOverdue) || '0',
@@ -679,7 +716,7 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
       // Wilful-default status 0 = No; the DATE slot is likewise a literal "0" (both
       // goldens do this — FLAT_BODY relaxes that field to string); suit-filed 00 = none.
       wilfulDefaultStatus: wilfulCode(input.wilfulDefault) || '0',
-      wilfulDefaultDate: '0',
+      wilfulDefaultDate: opts.wilfulDateZero ? '0' : '',
       suitFiledStatus: '00',
     }),
   });
@@ -699,15 +736,15 @@ function explode(input: Record<string, FieldValue>, ctx: FlatExplodeContext): Se
       values: row({
         _tag: 'GS',
         gsDuns: DEFAULTS.relationshipDuns,
-        gsRelatedType: mapLegend(RELATED_TYPE, gtor.type) ?? '',
-        gsNamePrefix: GENDER_PREFIX[g] ?? '',
+        gsRelatedType: gsRelType(mapLegend(RELATED_TYPE, gtor.type) ?? '', opts),
+        gsNamePrefix: prefixMap[g] ?? '',
         gsFullName: name,
         gsGender: GENDER_CODE[g] ?? '',
         gsDateOfBirth: ddmmyyyy(gtor.dob),
         gsPan: strNA(gtor.pan),
         gsAddressLine1: ga.line1,
         gsCity: ga.city,
-        gsDistrict: ga.stateName,
+        gsDistrict: ga.city,
         gsStateCode: ga.stateCode,
         gsPinCode: ga.pinCode,
         gsCountry: DEFAULTS.countryCode,
@@ -869,5 +906,27 @@ export const commercialUcrfFlat: FormatSpec = {
     // Accountant fills these top-of-sheet cells; a non-blank value overrides the
     // matching CLI flag. A5/A6/A7 hold the labels; B5/B6/B7 the values.
     headerCells: { B5: 'memberId', B6: 'reportingDate', B7: 'creationDate' },
+  },
+};
+
+/**
+ * Commercial UCRF **V3.10** profile — same mapping engine as the V3.9 flat format, with
+ * the current bureau conventions: HD Information Type = `ME`, upper-case RS/GS prefixes,
+ * unpadded GS Related-Type, Drawing Power as-entered (no sanctioned-amount fallback), and
+ * a blank wilful-default date. Verified against `commercial_output_9July_Final.txt`.
+ */
+export const commercialUcrfFlatV310: FormatSpec = {
+  ...commercialUcrfFlat,
+  id: 'commercial-ucrf-flat-v310',
+  label: 'Commercial UCRF V3.10',
+  version: '3.10',
+  // Default the header Information Type to "ME" (Month End); a meta value still wins.
+  buildHeaderRow: (meta) => ({
+    ...commercialUcrfFlat.buildHeaderRow!(meta),
+    infoType: (meta.infoType as string) ?? 'ME',
+  }),
+  flatExplode: {
+    ...commercialUcrfFlat.flatExplode!,
+    explode: (input, ctx) => explode(input, ctx, V310_OPTS),
   },
 };

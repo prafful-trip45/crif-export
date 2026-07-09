@@ -158,6 +158,33 @@ The accountant keeps **one flat row per borrower** in a "Master Sheet"; each row
 - **Header cells** `B5/B6/B7` = Member ID / Reporting Date / Creation Date override CLI flags.
   Creation Date is often absent from the sheet → supply via UI/CLI.
 
+## 3a. V3.10 deltas (spec dated 13 Apr 2026)
+
+The client also ships `Commercial UCRF - V3.10-Delimited_13th April 2026.pdf`. Changes vs V3.9:
+- **HD Information Type** (§7.1 field 6) can be **`ME` (Month End)** — also `DL`/`W1`/`W2`/`W3`.
+  V3.9 files used `01`. (In `commercial-ucrf.ts` this is `INFO_TYPE`, default `01`.)
+- **Credit Type is 4-digit zero-padded** (`0200`, `0300`, `0410` …) — V3.9 used `200`/`300`/`5200`.
+- **Legal Constitution** adds `90 Individual`.
+- **Business Category** DROPS `01 MSME` / `02 SME`; adds `08 Retail`, `09 Agri` (Micro `03` … Others `07`).
+  Legacy sheets still type "MSME"/"SME" — mapping those to a V3.10 code is a business decision.
+- **State** adds `37 Ladakh`, `77 Foreign address`; `08` now covers "Dadra & Nagar Haveli AND Daman &
+  Diu" (both `08` and `09` still accepted).
+- New catalogues: 8.16 (Tangible) Security Coverage, 8.17 Guarantee Coverage, 8.19 Assessment Agency,
+  8.20 Reason for Inward Cheque Dishonour.
+
+**Implemented:** additive catalogues (constitution 90, category 08/09, state 37/77) are global; the
+version-specific conventions live behind a **separate format id `commercial-ucrf-flat-v310`**
+(`commercialUcrfFlatV310`), which flips `FlatOpts`: HD info-type default `ME`, upper-case RS/GS prefixes
+(`MR`/`MS`), **un**padded GS Related-Type (`2` not `02`), Drawing Power as-entered (no sanctioned-amount
+fallback), blank wilful-default date. The V3.9 `commercial-ucrf-flat` keeps the legacy behaviour, so both
+versions' goldens pass. Credit-type codes are entered 4-digit in the sheet (e.g. `0410`) — the converter
+passes numeric codes through, so no padding logic is needed.
+
+**Cross-version conventions now global (per the client):** MSME→`03` (Micro), SME→`04` (Small);
+**District holds the CITY** (a state name only drives the 2-digit code, never District); **Office DUNS
+defaults to `999999999`**. These changed the V3.9 golden test outputs (re-blessed) — expected when a
+convention rule changes.
+
 ## 4. Gotchas / non-determinism
 - Some client "golden" outputs are **hand-finalized**: identical input rows can carry different
   codes (seen in `commercial_output_1Jul_OD_Loan.txt` — same "PARTNER" → 30/60/51). Such files are

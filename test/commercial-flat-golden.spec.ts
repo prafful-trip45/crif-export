@@ -43,13 +43,14 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
 
     expect(out[0]).toBe('HD|NBFCHE3014||26032026|31012026|01|');
     expect(out[1]).toBe('BS|HO||APL Infotech Limited||||AACCA3994L|||||12|06|06|||||||||||||');
-    // This sheet uses the "<street>, <City> - <PIN>. COUNTRY" form (no state name in
-    // the text) -> Line 1 is the street portion, state via the city lookup.
+    // "<street>, <City> - <PIN>. COUNTRY" form (no state name in the text) -> Line 1 is
+    // the street portion; District holds the CITY (Mumbai), state only drives the code;
+    // Office DUNS defaults to 999999999.
     expect(out[2]).toBe(
-      "AS|01||D' Building, Shivsagar Estate, 6th Floor, Dr. Annie Besant Road,Worli|||Mumbai|Maharashtra|20|400018|079|||||||",
+      "AS|01|999999999|D' Building, Shivsagar Estate, 6th Floor, Dr. Annie Besant Road,Worli|||Mumbai|Mumbai|20|400018|079|||||||",
     );
     expect(out[3]).toBe(
-      'RS|999999999|2|51||||Mr|HEMANT KUMAR RUIA|01|||24021958|AADPR8349A||||||||||||Mimraj Building, 405, Kalbadevi Road|||Mumbai|Maharashtra|20|400002|079|2222015336||||||',
+      'RS|999999999|2|51||||Mr|HEMANT KUMAR RUIA|01|||24021958|AADPR8349A||||||||||||Mimraj Building, 405, Kalbadevi Road|||Mumbai|Mumbai|20|400002|079|2222015336||||||',
     );
     // Wilful-default DATE slot is a literal "0" (matches the client golden).
     expect(out[4]).toBe(
@@ -65,10 +66,13 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
     const golden = readFileSync(fix('golden-output.txt')).toString('latin1');
     const result = await convert(buf, commercialUcrfFlat, META);
 
-    // Only remaining divergence from the hand-made client golden: we trim the RS
-    // line-1 trailing comma+spaces. (The wilful-date "0" and the no-filler layout now
-    // match the golden exactly.)
-    const expected = golden.replace('Kalbadevi Road,  |', 'Kalbadevi Road|');
+    // Documented divergences from the hand-made client golden, now that District=city
+    // and Office DUNS defaults to 999999999: trim the RS line-1 trailing comma, add the
+    // DUNS, and use the CITY (Mumbai) in District instead of the state name.
+    const expected = golden
+      .replace('Kalbadevi Road,  |', 'Kalbadevi Road|')
+      .replace('AS|01||', 'AS|01|999999999|')
+      .replaceAll('Mumbai|Maharashtra|20', 'Mumbai|Mumbai|20');
 
     expect(result.outputText!).toBe(expected);
   });
