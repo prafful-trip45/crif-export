@@ -64,27 +64,34 @@ jobs:
         working-directory: packages/desktop
         run: npm install
 
-      # The login gate is active only when VITE_LICENSE_SERVER_URL is baked in at
-      # build time (see packages/desktop/src/auth.ts). Vite exposes VITE_* vars from
-      # a .env FILE, not from process.env — so injecting it as an env var on the
-      # build step is NOT enough (the installer then opens with no login). Write the
-      # gitignored .env from the repo secret here so `vite build` picks it up. Fails
-      # loudly if the secret is empty rather than shipping an ungated build.
-      - name: Bake login-gate server URL into .env
+      # The login gate is active only when VITE_LICENSE_SERVER_URL is baked into the
+      # frontend at build time (see auth.ts). vite.config.ts resolves it from
+      # process.env (injected below) so it works regardless of CWD/.env location.
+      # Build the frontend explicitly and FAIL the job if the gate URL isn't present
+      # in dist — so we never silently ship an installer that opens with no login.
+      - name: Build frontend + verify login gate is baked in
         working-directory: packages/desktop
         shell: bash
+        env:
+          VITE_LICENSE_SERVER_URL: ${{ secrets.VITE_LICENSE_SERVER_URL }}
         run: |
-          URL="${{ secrets.VITE_LICENSE_SERVER_URL }}"
-          if [ -z "$URL" ]; then
-            echo "::error::VITE_LICENSE_SERVER_URL secret is empty — the build would have NO login gate."
+          if [ -z "$VITE_LICENSE_SERVER_URL" ]; then
+            echo "::error::VITE_LICENSE_SERVER_URL secret is empty — build would have NO login gate."
             exit 1
           fi
-          echo "VITE_LICENSE_SERVER_URL=$URL" > .env
-          echo "Wrote packages/desktop/.env (login gate -> $URL)"
+          npm run build
+          HOST="$(echo "$VITE_LICENSE_SERVER_URL" | sed -E 's#https?://##; s#/.*##')"
+          if grep -rq "$HOST" dist; then
+            echo "Login gate baked into dist ($HOST) ✓"
+          else
+            echo "::error::Login-gate URL ($HOST) NOT found in built frontend — gate would be OFF."
+            exit 1
+          fi
 
       - name: Build app (tauri)
         uses: tauri-apps/tauri-action@v0
         env:
+          # vite.config reads this from process.env and bakes it via `define`.
           VITE_LICENSE_SERVER_URL: ${{ secrets.VITE_LICENSE_SERVER_URL }}
         with:
           projectPath: packages/desktop

@@ -1,6 +1,10 @@
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 // Browser-dev fallback for the app version (the Tauri shell uses getVersion()).
 // Kept in lockstep with tauri.conf.json/Cargo.toml by scripts/bump-version.mjs.
@@ -47,7 +51,17 @@ function stripCrossorigin(): Plugin {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // The login gate reads VITE_LICENSE_SERVER_URL at build time (auth.ts). Vite only
+  // loads .env files from its ROOT (the CWD), and the Tauri build (tauri-action's
+  // beforeBuildCommand) runs from a directory where a plain `.env` lookup misses, so
+  // the var came out empty and the packaged app opened with NO login. Resolve it
+  // explicitly here — from this dir's .env AND from process.env (CI injects it that
+  // way) — and `define` it statically so it's baked regardless of CWD.
+  const fileEnv = loadEnv(mode, HERE, 'VITE_');
+  const licenseServerUrl = process.env.VITE_LICENSE_SERVER_URL || fileEnv.VITE_LICENSE_SERVER_URL || '';
+
+  return {
   plugins: [
     jsToTsResolve(),
     stripCrossorigin(),
@@ -64,6 +78,7 @@ export default defineConfig({
   ],
   define: {
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkgVersion),
+    'import.meta.env.VITE_LICENSE_SERVER_URL': JSON.stringify(licenseServerUrl),
   },
   clearScreen: false,
   server: {
@@ -78,4 +93,5 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: !!process.env.TAURI_DEBUG,
   },
+  };
 });
