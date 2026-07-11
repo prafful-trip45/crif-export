@@ -88,6 +88,17 @@ jobs:
             exit 1
           fi
 
+      # tauri-action re-runs beforeBuildCommand (npm run build) itself, and THAT rebuild
+      # was landing an ungated dist (the URL wasn't reaching it) — overwriting the
+      # verified dist above. Clear beforeBuildCommand so Tauri bundles the EXACT dist we
+      # just built and verified, instead of rebuilding it.
+      - name: Bundle the verified frontend (disable Tauri's own rebuild)
+        working-directory: packages/desktop/src-tauri
+        shell: bash
+        run: |
+          node -e "const fs=require('fs');const f='tauri.conf.json';const c=JSON.parse(fs.readFileSync(f,'utf8'));c.build.beforeBuildCommand='';fs.writeFileSync(f,JSON.stringify(c,null,2));"
+          echo "Cleared beforeBuildCommand — Tauri will bundle the pre-built, verified dist"
+
       - name: Build app (tauri)
         uses: tauri-apps/tauri-action@v0
         env:
