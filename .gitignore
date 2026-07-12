@@ -11,3 +11,6 @@ brochure/
 db.txt
 *.env
 .env*
+
+# Local wrangler/miniflare state
+**/.wrangler/
