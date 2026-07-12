@@ -35,14 +35,19 @@
             <input type="text" id="memberId" placeholder="e.g. NBF1111111" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
           </div>
           <div>
-            <label>Reporting / cycle date <span class="hint">DD/MM/YYYY</span></label>
-            <div class="datefield">
-              <input type="text" id="reportingDate" placeholder="30/04/2024" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
-              <button type="button" class="date-btn" id="reportingDatePick" aria-label="Pick reporting date" title="Pick a date">
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1Zm12 7H5v10h14V9Zm0-2V6H5v1h14Z"/></svg>
-              </button>
-              <input type="date" class="date-native" id="reportingDateNative" tabindex="-1" aria-hidden="true" />
+            <label>Reporting / cycle date <span class="hint" id="reportingCycleHint"></span></label>
+            <!-- The reporting date is always one of four fixed cycle points: the 9th (W1),
+                 16th (W2), 23rd (W3), or the last day of the month (ME). Pick a month, then
+                 the cycle point — no free calendar. `reportingDate` holds DD/MM/YYYY and stays
+                 the source of truth for the rest of the app. -->
+            <input type="month" id="reportingMonth" class="cycle-month" aria-label="Reporting month" />
+            <div class="cycle-seg" id="cycleSeg" role="group" aria-label="Reporting cycle">
+              <button type="button" class="cycle-opt" data-cycle="W1">9th <span>W1</span></button>
+              <button type="button" class="cycle-opt" data-cycle="W2">16th <span>W2</span></button>
+              <button type="button" class="cycle-opt" data-cycle="W3">23rd <span>W3</span></button>
+              <button type="button" class="cycle-opt" data-cycle="ME">Month-end <span>ME</span></button>
             </div>
+            <input type="text" id="reportingDate" hidden autocomplete="off" />
           </div>
           <div>
             <label>Creation date <span class="hint">DD/MM/YYYY</span></label>

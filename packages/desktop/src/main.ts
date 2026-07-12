@@ -494,8 +494,82 @@ function wireDatePicker(textId: string, btnId: string, nativeId: string): void {
 }
 
 function wireDatePickers(): void {
-  wireDatePicker('reportingDate', 'reportingDatePick', 'reportingDateNative');
+  wireReportingCyclePicker();
   wireDatePicker('creationDate', 'creationDatePick', 'creationDateNative');
+}
+
+/**
+ * The reporting/cycle date is always one of four fixed points in a month:
+ *   9th → W1 · 16th → W2 · 23rd → W3 · last day of the month → ME.
+ * Instead of a free calendar we offer a month/year selector plus those four choices.
+ * The hidden #reportingDate text input keeps the DD/MM/YYYY value the rest of the app
+ * reads; #reportingCycleHint shows the resulting date + code.
+ */
+function wireReportingCyclePicker(): void {
+  const monthEl = $('reportingMonth') as HTMLInputElement;
+  const seg = $('cycleSeg') as HTMLElement;
+  const text = $('reportingDate') as HTMLInputElement;
+  const hint = $('reportingCycleHint') as HTMLElement;
+  if (!monthEl || !seg || !text) return;
+
+  const opts = Array.from(seg.querySelectorAll<HTMLButtonElement>('.cycle-opt'));
+
+  /** Day-of-month for a cycle within a given year/month (ME = last day). */
+  const cycleDay = (year: number, month0: number, cycle: string): number => {
+    if (cycle === 'W1') return 9;
+    if (cycle === 'W2') return 16;
+    if (cycle === 'W3') return 23;
+    return new Date(year, month0 + 1, 0).getDate(); // ME = last day
+  };
+
+  /** Recompute #reportingDate from the current month + active cycle button. */
+  const apply = (): void => {
+    const active = opts.find((b) => b.classList.contains('active'));
+    if (!monthEl.value || !active) {
+      text.value = '';
+      if (hint) hint.textContent = '';
+    } else {
+      const parts = monthEl.value.split('-'); // "YYYY-MM"
+      const y = Number(parts[0]);
+      const m = Number(parts[1]);
+      const cycle = active.dataset.cycle!;
+      const day = cycleDay(y, m - 1, cycle);
+      const dd = String(day).padStart(2, '0');
+      const mm = String(m).padStart(2, '0');
+      text.value = `${dd}/${mm}/${y}`;
+      if (hint) hint.textContent = `${dd}/${mm}/${y} · ${cycle}`;
+    }
+    // Notify the rest of the app (persistence on 'change', gating on 'input').
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+    text.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  const selectCycle = (cycle: string): void => {
+    opts.forEach((b) => b.classList.toggle('active', b.dataset.cycle === cycle));
+    apply();
+  };
+
+  opts.forEach((b) => b.addEventListener('click', () => selectCycle(b.dataset.cycle!)));
+  monthEl.addEventListener('change', apply);
+  monthEl.addEventListener('input', apply);
+
+  // Seed the controls from any restored #reportingDate (DD/MM/YYYY), else default to
+  // the current month with the month-end (ME) cycle selected.
+  const restored = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((text.value || '').trim());
+  if (restored) {
+    const dd = restored[1]!;
+    const mm = restored[2]!;
+    const yyyy = restored[3]!;
+    monthEl.value = `${yyyy}-${mm}`;
+    const day = +dd;
+    const lastDay = new Date(+yyyy, +mm, 0).getDate();
+    const cycle = day === 9 ? 'W1' : day === 16 ? 'W2' : day === 23 ? 'W3' : day === lastDay ? 'ME' : day < 9 ? 'W1' : day <= 16 ? 'W2' : day <= 23 ? 'W3' : 'ME';
+    selectCycle(cycle);
+  } else {
+    const now = new Date();
+    monthEl.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    selectCycle('ME');
+  }
 }
 
 async function onGenerate() {

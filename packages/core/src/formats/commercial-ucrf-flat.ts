@@ -910,14 +910,26 @@ export const commercialUcrfFlat: FormatSpec = {
 };
 
 /**
- * HD "Reporting cycle" (V3.10 §7.1 field 6) derived from the reporting/cycle date's
- * day-of-month. Per the spec the weekly incremental submissions are "as on" the 9th
- * (W1), 16th (W2) and 23rd (W3), with the month-end submission = ME:
- *   day ≤ 9 → W1 · 10–16 → W2 · 17–23 → W3 · 24–end → ME
+ * HD "Reporting cycle" (V3.10 §7.1 field 6) derived from the reporting/cycle date.
+ * The bureau's reporting date is always one of four fixed points in the month, and
+ * the code maps exactly to them:
+ *   9th → W1 · 16th → W2 · 23rd → W3 · last calendar day of the month → ME
+ * (W1/W2/W3 = the 1st/2nd/3rd weekly incremental submission "as on" the 9th/16th/23rd;
+ * ME = month end.) For any non-canonical day we still return a sensible bucket by the
+ * nearest boundary so older/hand-entered data never crashes.
  */
 export function reportingCycleCode(reportingDate: Date): string {
   const day = reportingDate.getUTCDate();
-  if (day <= 9) return 'W1';
+  const lastDay = new Date(
+    Date.UTC(reportingDate.getUTCFullYear(), reportingDate.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  // Exact canonical dates first.
+  if (day === 9) return 'W1';
+  if (day === 16) return 'W2';
+  if (day === 23) return 'W3';
+  if (day === lastDay) return 'ME';
+  // Fallback for a non-canonical day: nearest bucket by boundary.
+  if (day < 9) return 'W1';
   if (day <= 16) return 'W2';
   if (day <= 23) return 'W3';
   return 'ME';

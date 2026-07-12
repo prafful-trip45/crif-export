@@ -143,6 +143,51 @@ input[type="checkbox"] {
   padding: 0;
   pointer-events: none; /* the button drives it; this just anchors the popup */
 }
+/* Reporting-cycle date picker: month/year + four fixed cycle points (no free calendar). */
+.cycle-month {
+  width: 100%;
+  padding: 9px 11px;
+  background: #0d1117;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  color-scheme: dark;
+}
+.cycle-seg {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+.cycle-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 4px;
+  background: #0d1117;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cycle-opt span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.cycle-opt:hover {
+  border-color: var(--accent);
+}
+.cycle-opt.active {
+  border-color: var(--accent);
+  background: rgba(79, 140, 255, 0.14);
+}
+.cycle-opt.active span {
+  color: var(--accent);
+}
 .row {
   display: flex;
   gap: 14px;

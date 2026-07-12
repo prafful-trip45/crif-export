@@ -171,16 +171,30 @@ describe('reference-files pre-rollout validation', () => {
     expect(out.filter((l) => l.startsWith('BS')).length).toBeGreaterThan(0);
   });
 
-  // HD Reporting-cycle code is derived from the reporting date (V3.10): W1=9th, W2=16th,
-  // W3=23rd, ME=month-end.
-  it('derives the HD reporting-cycle code from the reporting date', async () => {
+  // HD Reporting-cycle code is derived from the reporting date (V3.10). The bureau's
+  // reporting date is always one of four fixed points: 9th→W1, 16th→W2, 23rd→W3, and the
+  // LAST calendar day of the month→ME (regardless of whether that's the 28/29/30/31).
+  it('derives the HD reporting-cycle code from the reporting date (exact + month-end)', async () => {
     const buf = readFileSync(ref('commercial_input_9July_Final.xlsx'));
-    const cases: Array<[number, string]> = [
-      [5, 'W1'], [9, 'W1'], [10, 'W2'], [16, 'W2'], [17, 'W3'], [23, 'W3'], [24, 'ME'], [31, 'ME'],
+    // [year, month(0-based), day, expectedCode]
+    const cases: Array<[number, number, number, string]> = [
+      // exact canonical weekly dates
+      [2026, 6, 9, 'W1'], // 09 Jul
+      [2026, 6, 16, 'W2'], // 16 Jul
+      [2026, 6, 23, 'W3'], // 23 Jul
+      // month-end = last day, whatever the month length
+      [2026, 6, 31, 'ME'], // Jul has 31
+      [2026, 3, 30, 'ME'], // Apr has 30
+      [2026, 1, 28, 'ME'], // Feb 2026 (non-leap) has 28
+      [2024, 1, 29, 'ME'], // Feb 2024 (leap) has 29
+      // a non-last day of a 31-day month is NOT month-end (falls to nearest bucket)
+      [2026, 6, 30, 'ME'], // 30th ≥24 → ME by fallback
+      [2026, 6, 5, 'W1'], // <9 → W1 by fallback
+      [2026, 6, 20, 'W3'], // 17–23 → W3 by fallback
     ];
-    for (const [day, code] of cases) {
+    for (const [y, mo, day, code] of cases) {
       const r: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), {
-        memberId: 'NB1', reportingDate: new Date(Date.UTC(2026, 6, day)), creationDate: new Date(Date.UTC(2026, 6, day)),
+        memberId: 'NB1', reportingDate: new Date(Date.UTC(y, mo, day)), creationDate: new Date(Date.UTC(y, mo, day)),
       }, { allowWarnings: true });
       expect(r.outputText.split('|')[5]).toBe(code); // HD field 6 = reporting cycle
     }
