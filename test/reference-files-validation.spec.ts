@@ -165,9 +165,25 @@ describe('reference-files pre-rollout validation', () => {
     };
     const result: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), meta, { allowWarnings: true });
     const out: string[] = (result.outputText ?? '').split('\r\n');
-    // HD member id comes from meta, not from B5 ("Borrower's PAN"); dates from meta, not B6/B7 PANs.
-    expect(out[0]).toBe('HD|NB51840001||01072026|07072026|ME|');
+    // HD member id comes from meta, not from B5 ("Borrower's PAN"); dates from meta, not B6/B7
+    // PANs. Reporting date 07072026 (7th) derives the cycle code W1.
+    expect(out[0]).toBe('HD|NB51840001||01072026|07072026|W1|');
     expect(out.filter((l) => l.startsWith('BS')).length).toBeGreaterThan(0);
+  });
+
+  // HD Reporting-cycle code is derived from the reporting date (V3.10): W1=9th, W2=16th,
+  // W3=23rd, ME=month-end.
+  it('derives the HD reporting-cycle code from the reporting date', async () => {
+    const buf = readFileSync(ref('commercial_input_9July_Final.xlsx'));
+    const cases: Array<[number, string]> = [
+      [5, 'W1'], [9, 'W1'], [10, 'W2'], [16, 'W2'], [17, 'W3'], [23, 'W3'], [24, 'ME'], [31, 'ME'],
+    ];
+    for (const [day, code] of cases) {
+      const r: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), {
+        memberId: 'NB1', reportingDate: new Date(Date.UTC(2026, 6, day)), creationDate: new Date(Date.UTC(2026, 6, day)),
+      }, { allowWarnings: true });
+      expect(r.outputText.split('|')[5]).toBe(code); // HD field 6 = reporting cycle
+    }
   });
 
   // --- CATCH WRONG INPUTS: synthetic malformed workbooks must be rejected. ---

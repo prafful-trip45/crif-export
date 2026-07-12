@@ -18,10 +18,13 @@ export const INFO_TYPE = {
   '01': 'Standard submission',
   '02': 'Correction',
   ME: 'Month End',
-  W1: 'Week 1',
-  W2: 'Week 2',
-  W3: 'Week 3',
+  W1: 'Week 1 (as on 9th)',
+  W2: 'Week 2 (as on 16th)',
+  W3: 'Week 3 (as on 23rd)',
   DL: 'Daily',
+  DC: 'Data correction / Dispute',
+  AH: 'Adhoc submission',
+  RR: 'Data rejection resubmission',
 } as const;
 
 /**
