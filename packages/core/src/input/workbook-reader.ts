@@ -250,14 +250,29 @@ export async function readFlatHeaderOverrides(
   const set = (key: string, v: FieldValue): void => {
     if (v === undefined || String(v).trim() === '') return;
     if (key === 'reportingDate' || key === 'creationDate') {
-      out[key] = coerceCell({ key, type: 'date-ddmmyyyy', mandatory: false }, v as RawCell);
+      // Only a value that actually PARSES to a date overrides the flag. In expanded
+      // templates the fixed B6/B7 addresses land on data cells (e.g. a PAN); coercing
+      // that yields a non-Date, which would later crash formatDdmmyyyy — so skip it.
+      const coerced = coerceCell({ key, type: 'date-ddmmyyyy', mandatory: false }, v as RawCell);
+      if (coerced instanceof Date) out[key] = coerced;
     } else {
       out[key] = String(v).trim();
     }
   };
 
-  // Configured fixed-address cells take precedence (canonical layout).
-  for (const [addr, key] of Object.entries(cells ?? {})) set(key, normalizeRaw(cellRaw(ws.getCell(addr))));
+  // Configured fixed-address cells take precedence (canonical layout). These addresses
+  // are only the member-id/date header cells when the sheet uses the canonical top-row
+  // block (label in column A). Guard the member-id override with its adjacent label so a
+  // shifted/expanded template (where B5 is a data column header like "Borrower's PAN")
+  // doesn't hijack the Member ID.
+  for (const [addr, key] of Object.entries(cells ?? {})) {
+    if (key === 'memberId') {
+      const row = /\d+/.exec(addr)?.[0];
+      const label = row ? String(cellRaw(ws.getCell(`A${row}`)) ?? '') : '';
+      if (!/member/i.test(label)) continue;
+    }
+    set(key, normalizeRaw(cellRaw(ws.getCell(addr))));
+  }
 
   // Flat path: backfill any header keys the fixed addresses missed by locating the
   // form's TUDF header block (label row + value row directly below) by its known

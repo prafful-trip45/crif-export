@@ -151,6 +151,25 @@ describe('reference-files pre-rollout validation', () => {
     expect(out[6]).toBe('TS|1|1|');
   });
 
+  // Regression: an expanded template whose header row is NOT the canonical top block, so
+  // the fixed B5/B6/B7 header-cell addresses land on DATA (e.g. B6/B7 are PANs). Those
+  // must NOT be taken as reporting/creation dates (a non-date there previously crashed
+  // formatDdmmyyyy with "getUTCDate is not a function"), and B5 (a column header) must
+  // NOT hijack the Member ID.
+  it('does not crash when header-cell addresses land on data (member-id/date guard)', async () => {
+    const buf = readFileSync(ref('CIC Commercial Data Master Sheet.xlsx'));
+    const meta: FileMeta = {
+      memberId: 'NB51840001',
+      reportingDate: new Date(Date.UTC(2026, 6, 7)), // 07072026
+      creationDate: new Date(Date.UTC(2026, 6, 1)), // 01072026
+    };
+    const result: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), meta, { allowWarnings: true });
+    const out: string[] = (result.outputText ?? '').split('\r\n');
+    // HD member id comes from meta, not from B5 ("Borrower's PAN"); dates from meta, not B6/B7 PANs.
+    expect(out[0]).toBe('HD|NB51840001||01072026|07072026|ME|');
+    expect(out.filter((l) => l.startsWith('BS')).length).toBeGreaterThan(0);
+  });
+
   // --- CATCH WRONG INPUTS: synthetic malformed workbooks must be rejected. ---
   describe('wrong inputs are rejected (not silently mis-converted)', () => {
     const buildWb = async (fill: (ws: ExcelJS.Worksheet) => void): Promise<Buffer> => {
