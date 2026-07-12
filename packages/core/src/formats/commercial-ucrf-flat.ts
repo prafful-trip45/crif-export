@@ -910,20 +910,36 @@ export const commercialUcrfFlat: FormatSpec = {
 };
 
 /**
+ * HD "Reporting cycle" (V3.10 §7.1 field 6) derived from the reporting/cycle date's
+ * day-of-month. Per the spec the weekly incremental submissions are "as on" the 9th
+ * (W1), 16th (W2) and 23rd (W3), with the month-end submission = ME:
+ *   day ≤ 9 → W1 · 10–16 → W2 · 17–23 → W3 · 24–end → ME
+ */
+export function reportingCycleCode(reportingDate: Date): string {
+  const day = reportingDate.getUTCDate();
+  if (day <= 9) return 'W1';
+  if (day <= 16) return 'W2';
+  if (day <= 23) return 'W3';
+  return 'ME';
+}
+
+/**
  * Commercial UCRF **V3.10** profile — same mapping engine as the V3.9 flat format, with
- * the current bureau conventions: HD Information Type = `ME`, upper-case RS/GS prefixes,
- * unpadded GS Related-Type, Drawing Power as-entered (no sanctioned-amount fallback), and
- * a blank wilful-default date. Verified against `commercial_output_9July_Final.txt`.
+ * the current bureau conventions: HD Reporting cycle derived from the reporting date
+ * (W1/W2/W3/ME), upper-case RS/GS prefixes, unpadded GS Related-Type, Drawing Power
+ * as-entered (no sanctioned-amount fallback), and a blank wilful-default date. Verified
+ * against `commercial_output_9July_Final.txt`.
  */
 export const commercialUcrfFlatV310: FormatSpec = {
   ...commercialUcrfFlat,
   id: 'commercial-ucrf-flat-v310',
   label: 'Commercial UCRF V3.10',
   version: '3.10',
-  // Default the header Information Type to "ME" (Month End); a meta value still wins.
+  // HD Reporting-cycle code derived from the reporting date (W1=9th, W2=16th, W3=23rd,
+  // ME=month-end); an explicit meta.infoType (e.g. DL/DC/AH/RR) still overrides.
   buildHeaderRow: (meta) => ({
     ...commercialUcrfFlat.buildHeaderRow!(meta),
-    infoType: (meta.infoType as string) ?? 'ME',
+    infoType: (meta.infoType as string) || reportingCycleCode(meta.reportingDate),
   }),
   flatExplode: {
     ...commercialUcrfFlat.flatExplode!,
