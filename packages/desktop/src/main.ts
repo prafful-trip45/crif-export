@@ -21,6 +21,7 @@ import {
 } from './engine';
 import { getAppVersion } from './app-version';
 import { serverConfigured, isAuthenticated, heartbeat, login as authLogin } from './auth';
+import { reportingCycleCode } from '../../core/src/formats/commercial-ucrf-flat.js';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
 
@@ -591,7 +592,7 @@ function render(r: ConvertResult) {
   const actions = $('saveActions');
   const ext = getFormatExtension(val('format') as FormatId);
   if (r.output) {
-    addSaveButton(actions, 'Save submission file', `submission${ext}`, r.output, false);
+    addSaveButton(actions, 'Save submission file', submissionFileName(ext), r.output, false);
   }
   if (r.reportWorkbook) {
     addSaveButton(actions, 'Save workbook report (.xlsx)', 'report.xlsx', r.reportWorkbook, true);
@@ -661,7 +662,7 @@ function renderValidate(c: ConvertResult, cmp?: CompareResult) {
 
   if (c.output) {
     const ext = getFormatExtension(val('format') as FormatId);
-    addSaveButton($('saveActions'), 'Save the generated output', `generated${ext}`, c.output, true);
+    addSaveButton($('saveActions'), 'Save the generated output', submissionFileName(ext), c.output, true);
   }
 }
 
@@ -698,6 +699,38 @@ async function saveFile(defaultName: string, data: Uint8Array) {
 // ---- helpers ---------------------------------------------------------------
 function getFormatExtension(id: FormatId): string {
   return getFormat(id).outputExtension;
+}
+
+/**
+ * Build the CRIF submission file name the bureau expects:
+ *   `{MemberCode}_Commercial_{ReportingDDMMYYYY}_{CreationDDMMYYYY}_{HHMMSS}_{Cycle}.Tap`
+ * e.g. `NB51840001_Commercial_30062026_12072026_162820_ME.Tap`. The HHMMSS is the
+ * generation wall-clock time and the cycle (W1/W2/W3/ME) is derived from the
+ * reporting date. Falls back to a plain `submission{ext}` when the format isn't a
+ * commercial one or the required fields (member code / reporting date) are missing.
+ */
+function submissionFileName(ext: string): string {
+  const formatId = val('format') as FormatId;
+  const member = val('memberId').trim();
+  const reporting = toDdmmyyyy(val('reportingDate')); // DDMMYYYY | undefined
+  const isCommercial = formatId.startsWith('commercial');
+  if (!isCommercial || !member || !reporting) return `submission${ext}`;
+
+  const creation = toDdmmyyyy(val('creationDate')) || reporting;
+  const rd = new Date(
+    Date.UTC(+reporting.slice(4, 8), +reporting.slice(2, 4) - 1, +reporting.slice(0, 2)),
+  );
+  const cycle = reportingCycleCode(rd);
+
+  const now = new Date();
+  const hhmmss =
+    String(now.getHours()).padStart(2, '0') +
+    String(now.getMinutes()).padStart(2, '0') +
+    String(now.getSeconds()).padStart(2, '0');
+
+  // CRIF names the delimited commercial file with a `.Tap` extension regardless of
+  // the internal text extension used elsewhere in the tool.
+  return `${member}_Commercial_${reporting}_${creation}_${hhmmss}_${cycle}.Tap`;
 }
 
 function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
