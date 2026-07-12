@@ -102,8 +102,13 @@ function setMode(m: Mode) {
 }
 
 // ---- init ------------------------------------------------------------------
+// The legacy V3.9 commercial profile (`commercial-ucrf-flat`) is still registered in
+// the engine — it's the base the V3.10 profile is built from and several tests use it —
+// but only the current V3.10 commercial option is offered in the UI.
+const HIDDEN_FORMATS = new Set<FormatId>(['commercial-ucrf-flat', 'commercial-ucrf']);
+
 function init() {
-  const formats = listFormats();
+  const formats = listFormats().filter((f) => !HIDDEN_FORMATS.has(f.id));
   ($('format') as HTMLSelectElement).innerHTML = formats
     .map((f) => `<option value="${f.id}">${f.label}</option>`)
     .join('');
@@ -112,6 +117,8 @@ function init() {
   PERSIST.forEach((id) => {
     if (saved[id] != null && id !== 'format') (($(id) as HTMLInputElement).value = saved[id]);
   });
+  // Only restore a saved format if it's still an offered option (a previously-saved
+  // hidden/removed format falls back to the first available one).
   if (saved.format && formats.some((f) => f.id === saved.format))
     ($('format') as HTMLSelectElement).value = saved.format;
   if (saved.report) ($('report') as HTMLInputElement).checked = true;
@@ -703,11 +710,13 @@ function getFormatExtension(id: FormatId): string {
 
 /**
  * Build the CRIF submission file name the bureau expects:
- *   `{MemberCode}_Commercial_{ReportingDDMMYYYY}_{CreationDDMMYYYY}_{HHMMSS}_{Cycle}.Tap`
- * e.g. `NB51840001_Commercial_30062026_12072026_162820_ME.Tap`. The HHMMSS is the
+ *   `{MemberCode}_Commercial_{ReportingDDMMYYYY}_{CreationDDMMYYYY}_{HHMMSS}_{Cycle}{ext}`
+ * e.g. `NB51840001_Commercial_30062026_12072026_162820_ME.txt`. The HHMMSS is the
  * generation wall-clock time and the cycle (W1/W2/W3/ME) is derived from the
- * reporting date. Falls back to a plain `submission{ext}` when the format isn't a
- * commercial one or the required fields (member code / reporting date) are missing.
+ * reporting date. The extension is the format's own output extension (`.txt`) — the
+ * bureau portal rejects a `.Tap` upload. Falls back to a plain `submission{ext}`
+ * when the format isn't a commercial one or the required fields (member code /
+ * reporting date) are missing.
  */
 function submissionFileName(ext: string): string {
   const formatId = val('format') as FormatId;
@@ -728,9 +737,7 @@ function submissionFileName(ext: string): string {
     String(now.getMinutes()).padStart(2, '0') +
     String(now.getSeconds()).padStart(2, '0');
 
-  // CRIF names the delimited commercial file with a `.Tap` extension regardless of
-  // the internal text extension used elsewhere in the tool.
-  return `${member}_Commercial_${reporting}_${creation}_${hhmmss}_${cycle}.Tap`;
+  return `${member}_Commercial_${reporting}_${creation}_${hhmmss}_${cycle}${ext}`;
 }
 
 function toArrayBuffer(u8: Uint8Array): ArrayBuffer {

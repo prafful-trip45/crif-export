@@ -1,6 +1,6 @@
 [package]
 name = "crif-export-desktop"
-version = "0.1.9"
+version = "0.2.0"
 description = "CRIF Export — Excel to CRIF Highmark bureau submission files"
 authors = ["crif-export"]
 edition = "2021"
