@@ -30,7 +30,7 @@
 	],
 	"vars": {
 		"MIN_VERSION": "0.1.0",
-		"LATEST_VERSION": "0.1.8",
+		"LATEST_VERSION": "0.1.9",
 		"DOWNLOAD_URL": "https://cic.vidyasetu.net/download",
 		"ACCESS_TTL_SECONDS": "900",
 		"REFRESH_TTL_SECONDS": "2592000"
