@@ -10,7 +10,13 @@
     <div class="wrap">
       <header class="apphead">
         <h1>CIC - Text and TUDF converter</h1>
-        <span class="badge" id="offlineBadge" title="All processing happens on this machine. Your data never leaves the device.">● Offline · on-device</span>
+        <div class="headright">
+          <span class="badge" id="offlineBadge" title="All processing happens on this machine. Your data never leaves the device.">● Offline · on-device</span>
+          <div class="account hidden" id="account">
+            <span class="account-user" id="accountUser"></span>
+            <button type="button" class="linkbtn" id="logoutBtn" title="Sign out of this device">Sign out</button>
+          </div>
+        </div>
       </header>
       <p class="sub">Convert customer data in Excel → CRIF Highmark bureau submission files.</p>
 
@@ -144,6 +150,8 @@
         <a id="upgradeLink" class="dl" href="#" target="_blank" rel="noopener">Download the latest version</a>
       </div>
     </div>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -447,6 +447,9 @@ const CITY_STATE: Record<string, { code: string; name: string }> = {
   chennai: { code: '31', name: 'Tamil Nadu' },
   kolkata: { code: '35', name: 'West Bengal' },
   hyderabad: { code: '36', name: 'Telangana' },
+  vapi: { code: '11', name: 'Gujarat' },
+  silvassa: { code: '08', name: 'Dadra & Nagar Haveli' },
+  silwasa: { code: '08', name: 'Dadra & Nagar Haveli' }, // common misspelling of Silvassa
 };
 
 /** Strip a trailing country word + a " - <PIN>" / " <PIN>" tail from a city token. */
@@ -499,8 +502,9 @@ function splitAddress(raw: FieldValue): {
       city = cleanCityToken(beforePin.slice(lastComma + 1));
       s = beforePin.slice(0, lastComma).replace(/[\s,]+$/, '');
     } else {
-      city = cleanCityToken(beforePin);
-      s = '';
+      // Comma-less "<address words> <City> <PIN>" (e.g. "…English School Vapi 396191"):
+      // the last word before the PIN is the city; Line 1 keeps the full text.
+      city = cleanCityToken(beforePin.trim().split(/\s+/).pop() ?? '');
     }
   }
   const looked = CITY_STATE[city.toLowerCase()];

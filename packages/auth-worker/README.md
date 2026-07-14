@@ -1,4 +1,16 @@
-# CRIF Auth Worker (`crif-auth`)
+# CRIF Auth Worker (`crif-auth`) — ⚠️ RETIRED
+
+> **Superseded (Jul 2026) by the Vidyasetu backend** (`EduBridge-TS`, `/api/crif/*` on
+> Cloud Run, `https://api.vidyasetu.net`), which serves the identical contract backed by
+> MongoDB. The desktop app points there now (`packages/desktop/.env`).
+>
+> **Why it was retired:** the session heartbeat rewrote a KV record on every beat, which
+> blew Workers KV's free-tier ceiling of **1,000 writes/day**. Past the cap the write 429s,
+> the Worker 500s, and the desktop reads that as "offline" — silently **disabling Generate**
+> for the customer until the quota reset. Mongo has no such cap, and the Vidyasetu backend
+> was always the intended home for this gate (see `docs/ARCHITECTURE_AND_BUSINESS.md`).
+>
+> Kept for reference only. **Do not redeploy** or point `VITE_LICENSE_SERVER_URL` at it.
 
 Cloudflare Worker that provides **login + session validation** for the desktop app,
 enforcing **one active session per user, bound to the device** (User-Agent). It

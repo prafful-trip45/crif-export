@@ -20,8 +20,16 @@ import { parseUa, versionLt, type DeviceUa } from './ua.js';
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-const accessTtl = (env: Env): number => Number(env.ACCESS_TTL_SECONDS) || 900;
+const accessTtl = (env: Env): number => Number(env.ACCESS_TTL_SECONDS) || 86_400;
 const refreshTtl = (env: Env): number => Number(env.REFRESH_TTL_SECONDS) || 2_592_000;
+
+/**
+ * How stale `lastSeen` must get before a session check bothers to rewrite the session in KV.
+ * KV writes are the scarce resource (1,000/day on the free plan, account-wide); reads are
+ * effectively free at our volume. One rotation per user per DAY is all the TTL needs, and it
+ * keeps a whole company's usage in the low tens of writes.
+ */
+const SEEN_REFRESH_SECONDS = 86_400;
 
 function versionInfo(env: Env): { latestVersion?: string; downloadUrl?: string } {
   const out: { latestVersion?: string; downloadUrl?: string } = {};
@@ -101,9 +109,19 @@ export async function handleSession(req: Request, env: Env): Promise<Response> {
     return json({ status: 'session-revoked', reason: verdict }, 401);
   }
 
-  // Touch lastSeen (best-effort; keeps the TTL rolling on the active device).
-  session!.lastSeen = Math.floor(Date.now() / 1000);
-  await putSession(env.SESSIONS, session!, refreshTtl(env));
+  // Touch lastSeen to keep the TTL rolling on the active device — but only once a day, and
+  // never at the cost of the check itself. The verdict above is what gates the client; this
+  // write is bookkeeping, so if KV rejects it (e.g. the daily write quota is exhausted) we
+  // swallow the error rather than 500 — a failed touch must not lock a paying user out.
+  const now = Math.floor(Date.now() / 1000);
+  if (now - session!.lastSeen >= SEEN_REFRESH_SECONDS) {
+    session!.lastSeen = now;
+    try {
+      await putSession(env.SESSIONS, session!, refreshTtl(env));
+    } catch {
+      /* best-effort: the session stays valid until its existing TTL */
+    }
+  }
 
   return json({ ok: true, status: 'ok', ...versionInfo(env) });
 }
@@ -141,17 +159,44 @@ export async function handleRefresh(req: Request, env: Env): Promise<Response> {
 
 /* ---------- POST /api/crif/auth/logout ---------- */
 
+/**
+ * Sign out: DELETE the user's session record, which frees the single seat immediately —
+ * the account stops counting as "in use" and the next login (anywhere) starts clean.
+ *
+ * The caller may authenticate with EITHER credential, and we accept whichever proves the
+ * session is theirs:
+ *   - `Authorization: Bearer <access token>` — the sid in the JWT must be the CURRENT sid.
+ *   - `{ refreshToken }` in the body — its hash must be the session's CURRENT refresh hash.
+ *
+ * Taking both matters: the refresh token ROTATES on every refresh, so a client holding a
+ * stale copy would otherwise fail to revoke and silently strand the seat as occupied. We
+ * report `revoked` vs `not-found` honestly rather than always claiming success, so the
+ * client can tell a real server-side revoke from a no-op. The client clears its local
+ * tokens either way, so a stale/expired credential still logs the device out locally.
+ */
 export async function handleLogout(req: Request, env: Env): Promise<Response> {
   const body = (await req.json().catch(() => ({}))) as { refreshToken?: string };
   const refreshToken = String(body.refreshToken ?? '');
-  const userId = userIdFromRefreshToken(refreshToken);
-  if (userId) {
-    const session = await getSession(env.SESSIONS, userId);
-    if (session && session.refreshHash === (await sha256Hex(refreshToken))) {
-      await deleteSession(env.SESSIONS, userId);
-    }
+
+  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
+  const payload = bearer ? await verifyJwt(bearer, env.JWT_SECRET) : null;
+
+  const userId = payload?.sub ?? userIdFromRefreshToken(refreshToken);
+  if (!userId) return json({ status: 'not-found' });
+
+  const session = await getSession(env.SESSIONS, userId);
+  if (!session) return json({ status: 'not-found' }); // already gone — seat is free
+
+  const byAccess = !!payload && payload.sub === session.userId && payload.sid === session.sid;
+  const byRefresh = !!refreshToken && session.refreshHash === (await sha256Hex(refreshToken));
+  if (!byAccess && !byRefresh) {
+    // Neither credential matches the CURRENT session: this caller was already evicted
+    // (another device logged in). Their seat is not theirs to revoke — leave it alone.
+    return json({ status: 'not-found' });
   }
-  return json({ status: 'ok' });
+
+  await deleteSession(env.SESSIONS, userId);
+  return json({ status: 'revoked' });
 }
 
 /* ---------- POST /api/crif/admin/users (provisioning) ---------- */

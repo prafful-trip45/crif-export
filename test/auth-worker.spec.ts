@@ -257,6 +257,178 @@ describe('auth flow — one active session per user, bound to the device', () =>
     expect(hbAfterLogout.status).toBe(401);
   });
 
+  it('logs out with only the ACCESS token, even when the refresh token is stale', async () => {
+    // The desktop rotates its refresh token on every /refresh, so the copy it holds can
+    // lag the server's. Logout must still free the seat — otherwise the account stays
+    // "in use" forever and the user is locked out of signing in cleanly elsewhere.
+    const { env } = makeEnv();
+    await createUser(env.DB, { username: 'carol', password: 'S3cretPass!', companyId: 'c1' });
+
+    const login = await handleLogin(
+      req('POST', { 'x-vidyasetu-ua': UA('devA'), 'content-type': 'application/json' }, {
+        username: 'carol',
+        password: 'S3cretPass!',
+      }),
+      env,
+    );
+    const s = (await login.json()) as { token: string; refreshToken: string };
+
+    // Rotate the refresh token server-side; `s.refreshToken` is now STALE.
+    const refresh = await handleRefresh(
+      req('POST', { 'x-vidyasetu-ua': UA('devA'), 'content-type': 'application/json' }, {
+        refreshToken: s.refreshToken,
+      }),
+      env,
+    );
+    const r = (await refresh.json()) as { token: string; refreshToken: string };
+    expect(r.refreshToken).not.toBe(s.refreshToken);
+
+    // Log out presenting the access token + the STALE refresh token. The old handler
+    // (refresh-hash only) would have no-op'd here and stranded the session in KV.
+    const out = await handleLogout(
+      req(
+        'POST',
+        { authorization: `Bearer ${r.token}`, 'content-type': 'application/json' },
+        { refreshToken: s.refreshToken },
+      ),
+      env,
+    );
+    expect((await out.json()).status).toBe('revoked');
+
+    // Seat is genuinely free: the session record is gone from KV…
+    expect((env.SESSIONS as MiniKV).store.size).toBe(0);
+    // …and the still-unexpired access token no longer works.
+    const hb = await handleSession(
+      req('GET', { authorization: `Bearer ${r.token}`, 'x-vidyasetu-ua': UA('devA') }),
+      env,
+    );
+    expect(hb.status).toBe(401);
+  });
+
+  it('does not let an already-evicted device revoke the new session', async () => {
+    // Device A is evicted by device B. If A then hits logout, it must NOT delete B's
+    // session — otherwise a stale client could kick the legitimate user off.
+    const { env } = makeEnv();
+    await createUser(env.DB, { username: 'dave', password: 'S3cretPass!', companyId: 'c1' });
+    const creds = { username: 'dave', password: 'S3cretPass!' };
+
+    const loginA = await handleLogin(
+      req('POST', { 'x-vidyasetu-ua': UA('devA'), 'content-type': 'application/json' }, creds),
+      env,
+    );
+    const a = (await loginA.json()) as { token: string; refreshToken: string };
+
+    const loginB = await handleLogin(
+      req('POST', { 'x-vidyasetu-ua': UA('devB'), 'content-type': 'application/json' }, creds),
+      env,
+    ); // evicts A
+    const b = (await loginB.json()) as { token: string };
+
+    const out = await handleLogout(
+      req(
+        'POST',
+        { authorization: `Bearer ${a.token}`, 'content-type': 'application/json' },
+        { refreshToken: a.refreshToken },
+      ),
+      env,
+    );
+    expect((await out.json()).status).toBe('not-found'); // A's credentials are not current
+
+    // B is untouched and still signed in.
+    const hbB = await handleSession(
+      req('GET', { authorization: `Bearer ${b.token}`, 'x-vidyasetu-ua': UA('devB') }),
+      env,
+    );
+    expect((await hbB.json()).ok).toBe(true);
+  });
+
+  it('rotates the session in KV at most once a day, however often it is checked', async () => {
+    // KV WRITES are the scarce resource (1,000/day, account-wide, on the free plan) — and
+    // exhausting them once took the whole app down. The session check runs on every Generate
+    // click, so it must be read-mostly: `lastSeen` is rewritten only after a full day.
+    const { env } = makeEnv();
+    const kv = env.SESSIONS as MiniKV;
+    await createUser(env.DB, { username: 'erin', password: 'S3cretPass!', companyId: 'c1' });
+
+    const login = await handleLogin(
+      req('POST', { 'x-vidyasetu-ua': UA('devA'), 'content-type': 'application/json' }, {
+        username: 'erin',
+        password: 'S3cretPass!',
+      }),
+      env,
+    );
+    const s = (await login.json()) as { token: string };
+
+    let writes = 0;
+    const realPut = kv.put.bind(kv);
+    kv.put = async (k: string, v: string) => {
+      writes++;
+      return realPut(k, v);
+    };
+
+    const beat = () =>
+      handleSession(req('GET', { authorization: `Bearer ${s.token}`, 'x-vidyasetu-ua': UA('devA') }), env);
+
+    // A busy day of Generate clicks: lastSeen is fresh, so not one of them writes.
+    for (let i = 0; i < 50; i++) expect((await (await beat()).json()).ok).toBe(true);
+    expect(writes).toBe(0);
+
+    // Even hours later, still no write — the rotation window is a full DAY.
+    // (Erin is the only user, so hers is the only `sess:*` record in KV.)
+    const [key, raw] = [...kv.store.entries()][0]!;
+    const rec = JSON.parse(raw) as SessionRecord;
+    const age = async (seconds: number) => {
+      rec.lastSeen = Math.floor(Date.now() / 1000) - seconds;
+      await realPut(key, JSON.stringify(rec));
+      writes = 0;
+    };
+
+    await age(7_200); // 2h
+    expect((await (await beat()).json()).ok).toBe(true);
+    expect(writes).toBe(0);
+
+    // Past a day → the next check rotates it exactly once.
+    await age(86_401);
+    expect((await (await beat()).json()).ok).toBe(true);
+    expect(writes).toBe(1);
+    expect((await (await beat()).json()).ok).toBe(true);
+    expect(writes).toBe(1); // freshly touched → no further write
+  });
+
+  it('keeps the session valid when the KV touch fails (write quota exhausted)', async () => {
+    // The lastSeen write is bookkeeping, not the verdict. When KV refused it (daily put
+    // limit exceeded) the handler used to throw → 500 → the client read that as "offline"
+    // and disabled Generate. A failed touch must never lock a paying user out.
+    const { env } = makeEnv();
+    const kv = env.SESSIONS as MiniKV;
+    await createUser(env.DB, { username: 'frank', password: 'S3cretPass!', companyId: 'c1' });
+
+    const login = await handleLogin(
+      req('POST', { 'x-vidyasetu-ua': UA('devA'), 'content-type': 'application/json' }, {
+        username: 'frank',
+        password: 'S3cretPass!',
+      }),
+      env,
+    );
+    const s = (await login.json()) as { token: string };
+
+    // Age the session so the next check TRIES to write, then make every write fail.
+    const [key, raw] = [...kv.store.entries()][0]!;
+    const rec = JSON.parse(raw) as SessionRecord;
+    rec.lastSeen = Math.floor(Date.now() / 1000) - 86_401;
+    await kv.put(key, JSON.stringify(rec));
+    kv.put = async () => {
+      throw new Error('KV PUT failed: 429 daily limit exceeded');
+    };
+
+    const res = await handleSession(
+      req('GET', { authorization: `Bearer ${s.token}`, 'x-vidyasetu-ua': UA('devA') }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+  });
+
   it('blocks a client below MIN_VERSION with upgrade-required', async () => {
     const { env } = makeEnv();
     await createUser(env.DB, { username: 'bob', password: 'S3cretPass!', companyId: 'c1' });

@@ -73,6 +73,10 @@ const CHECKS: Check[] = [
   // outputs are hand-curated; the value here is that they now convert with ZERO errors.
   { kind: 'smoke', input: 'commercial_input_31March.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'commercial_input_30June.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  // 9 Jul NEW_CIC sheet: two borrowers write comma-less addresses with no state name
+  // ("…Near Modern English School Vapi 396191") — guards the splitAddress fallback
+  // that used to leave Address Line 1 blank (2 validation errors, file not generated).
+  { kind: 'smoke', input: 'NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx', format: 'commercial-ucrf-flat-v310', meta: META_DEFAULT },
 ];
 
 const err = (r: any) => (r.report?.issues ?? []).filter((i: any) => i.severity === 'error');

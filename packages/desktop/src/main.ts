@@ -20,7 +20,14 @@ import {
   type CompareResult,
 } from './engine';
 import { getAppVersion } from './app-version';
-import { serverConfigured, isAuthenticated, heartbeat, login as authLogin } from './auth';
+import {
+  serverConfigured,
+  isAuthenticated,
+  checkSession,
+  login as authLogin,
+  logout as authLogout,
+  currentUser,
+} from './auth';
 import { reportingCycleCode } from '../../core/src/formats/commercial-ucrf-flat.js';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
@@ -48,7 +55,7 @@ let blocked = false;
 // Connectivity is treated as a SOFT gate: instead of a modal, losing the
 // connection just disables the Generate button. Defaults to true (assume online)
 // so the app is usable immediately; the real connection is verified by the
-// heartbeat when the window gains focus.
+// session check the CTAs run.
 let online = true;
 
 // ---- form persistence ------------------------------------------------------
@@ -157,7 +164,8 @@ function init() {
   $('loginPass').addEventListener('keydown', (e) => {
     if ((e as KeyboardEvent).key === 'Enter') void onLoginSubmit();
   });
-  ($('connectionRetry') as HTMLButtonElement).onclick = () => void evaluateGate();
+  ($('connectionRetry') as HTMLButtonElement).onclick = () => void evaluateGate(true);
+  ($('logoutBtn') as HTMLButtonElement).onclick = () => void onLogout();
   refreshGo();
   startGateMonitor();
   void evaluateGate();
@@ -168,8 +176,12 @@ function init() {
 // SOFT gate: when offline / the server is unreachable, we simply disable the
 // Generate button (see `online` + refreshGo) instead of flashing a modal on every
 // focus change. The app does NOT block when backgrounded.
+//
+// The server is asked about the session ONLY on the CTAs — Generate, Validate, and the
+// connection Retry button (`evaluateGate(true)`). There is no background heartbeat: an
+// idle window cannot produce a file, so polling it bought nothing and cost a request per
+// user per tick. Everything else re-evaluates the gate LOCALLY (token present? online?).
 type GateReason = 'ok' | 'login' | 'connection' | 'upgrade';
-let gateTimer: number | undefined;
 let evaluating = false;
 
 function applyGate(
@@ -189,15 +201,73 @@ function applyGate(
     else link.classList.add('hidden');
   }
   if (reason === 'login') ($('loginUser') as HTMLInputElement).focus();
+  renderAccount(reason);
   refreshGo();
 }
 
-async function evaluateGate(force = false) {
+let toastTimer: number | undefined;
+
+/**
+ * Transient message pinned above the login overlay (which is why it lives outside it): the
+ * one case that must never be silent is a session revoked out from under the user, where
+ * the login screen alone looks like the app randomly logged them out.
+ */
+function showToast(message: string, ms = 6000) {
+  const el = $('toast');
+  el.textContent = message;
+  el.classList.remove('hidden');
+  if (toastTimer !== undefined) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => el.classList.add('hidden'), ms);
+}
+
+/**
+ * The account chip + Sign out button live in the header, and are only meaningful while
+ * the user is actually signed in and using the app — so they show only when the gate is
+ * open ('ok'). On an unconfigured/dev build (no licence server) there is no session to
+ * sign out of, so the chip stays hidden.
+ */
+function renderAccount(reason: GateReason) {
+  const signedIn = serverConfigured() && reason === 'ok' && isAuthenticated();
+  $('account').classList.toggle('hidden', !signedIn);
+  if (signedIn) $('accountUser').textContent = currentUser()?.username ?? '';
+}
+
+/**
+ * Sign out: tell the server to DELETE the session (so the seat is freed immediately and
+ * the account is no longer counted as in use), clear the local tokens, and drop back to
+ * the login overlay. `authLogout()` clears local state even if the network call fails, so
+ * we always end up logged out on this device.
+ */
+async function onLogout() {
+  const btn = $('logoutBtn') as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = 'Signing out…';
+  try {
+    await authLogout();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign out';
+    ($('loginUser') as HTMLInputElement).value = '';
+    ($('loginPass') as HTMLInputElement).value = '';
+    $('loginError').textContent = '';
+    applyGate('login');
+  }
+}
+
+/**
+ * Decide what the app may do right now.
+ *
+ * `verify: false` (the default) is a LOCAL evaluation — do we hold a token, are we online —
+ * and touches no network. `verify: true` additionally asks the server whether this device
+ * still owns the session and is on a supported version; only the CTAs do that, immediately
+ * before the work they gate.
+ */
+async function evaluateGate(verify = false) {
   if (!serverConfigured()) {
     applyGate('ok'); // dev / unconfigured build: no gating
     return;
   }
-  if (evaluating && !force) return; // periodic/event callers coalesce; clicks force
+  if (evaluating && !verify) return; // event callers coalesce; CTAs always run
   evaluating = true;
   try {
     if (!isAuthenticated()) {
@@ -210,17 +280,28 @@ async function evaluateGate(force = false) {
       applyGate('ok');
       return;
     }
+    if (!verify) {
+      applyGate('ok'); // signed in + online, as far as we can tell without asking the server
+      return;
+    }
     const version = await getAppVersion();
-    const hb = await heartbeat(version);
-    if (hb.status === 'ok') {
+    const check = await checkSession(version);
+    if (check.status === 'ok') {
       online = true;
       applyGate('ok');
-    } else if (hb.status === 'upgrade-required') {
-      applyGate('upgrade', { currentVersion: version, latestVersion: hb.latestVersion, downloadUrl: hb.downloadUrl });
-    } else if (hb.status === 'session-revoked' || hb.status === 'unauthenticated') {
+    } else if (check.status === 'upgrade-required') {
+      applyGate('upgrade', {
+        currentVersion: version,
+        latestVersion: check.latestVersion,
+        downloadUrl: check.downloadUrl,
+      });
+    } else if (check.status === 'session-revoked' || check.status === 'unauthenticated') {
+      // Signed in on another device (single session per user) — say so, don't just bounce
+      // them to a login screen with no explanation.
       applyGate('login');
+      showToast('Session ended — your account was signed in on another device. Please sign in again.');
     } else {
-      // 'unreachable' — soft-gate (disable Generate), no modal; retry on next focus/tick.
+      // 'unreachable' — soft-gate (disable Generate), no modal; the next CTA retries.
       online = false;
       applyGate('ok');
     }
@@ -231,19 +312,15 @@ async function evaluateGate(force = false) {
 
 function startGateMonitor() {
   if (!serverConfigured()) return;
-  window.addEventListener('online', () => void evaluateGate());
-  // Offline: just disable the button (soft gate), no modal.
+  // Connectivity only — these flip the soft gate locally and never call the server.
+  window.addEventListener('online', () => {
+    online = true;
+    refreshGo();
+  });
   window.addEventListener('offline', () => {
     online = false;
     refreshGo();
   });
-  // Re-verify the connection only when the window REGAINS focus (not on blur),
-  // so backgrounding the app never flashes a popup.
-  window.addEventListener('focus', () => void evaluateGate());
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) void evaluateGate();
-  });
-  if (gateTimer === undefined) gateTimer = window.setInterval(() => void evaluateGate(), 30000);
 }
 
 async function onLoginSubmit() {
@@ -268,9 +345,9 @@ async function onLoginSubmit() {
     const r = await authLogin(username, password, version);
     if (r.status === 'ok') {
       // Login already confirmed auth + version server-side, so dismiss the overlay
-      // directly. (Don't await a second evaluateGate() — its heartbeat round-trip
-      // can be slow or coalesced behind the `evaluating` flag, leaving the button
-      // stuck on "Signing in…" and the overlay up.)
+      // directly. (Don't await a second evaluateGate() — its round-trip can be slow
+      // or coalesced behind the `evaluating` flag, leaving the button stuck on
+      // "Signing in…" and the overlay up.)
       ($('loginPass') as HTMLInputElement).value = '';
       online = true;
       applyGate('ok');
@@ -574,8 +651,9 @@ function wireReportingCyclePicker(): void {
 
 async function onGenerate() {
   if (blocked) return;
-  // Fully strict: re-confirm a live, current, online session at the moment of
-  // generation (closes the gap between periodic heartbeats). No grace window.
+  // THE enforcement point: confirm a live, current, on-version session with the server at
+  // the moment of generation. No grace window, no cached verdict — a session revoked (or a
+  // build de-supported) since the last click cannot produce a submission file.
   if (serverConfigured()) {
     await evaluateGate(true);
     if (blocked) return;
