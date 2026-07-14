@@ -11,6 +11,7 @@ brochure/
 db.txt
 *.env
 .env*
+dist-installers
 
 # Local wrangler/miniflare state
 **/.wrangler/
