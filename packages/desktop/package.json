@@ -15,6 +15,7 @@
     "installers": "bash scripts/build-installers.sh",
     "installers:reinstall": "bash scripts/build-installers.sh --reinstall",
     "installers:ci": "bash scripts/build-installers.sh --print-ci",
+    "installers:win": "powershell -ExecutionPolicy Bypass -File scripts/build-installers.ps1",
     "icons": "tauri icon icons/source.png",
     "keygen": "node scripts/gen-attestation-key.mjs",
     "version:set": "node scripts/bump-version.mjs",

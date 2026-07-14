@@ -34,6 +34,12 @@ APP_NAME="CIC - Text and TUDF converter"
 BUNDLE_DIR="src-tauri/target/release/bundle"
 OS="$(uname -s)"
 
+# The licence/session backend baked into the build. `.env` is gitignored, so a fresh
+# clone (e.g. the Windows box that builds the .exe) has none — without this the app
+# ships with NO login gate at all (auth.ts: serverConfigured() === false). Default to
+# production; override for a dev build:  VITE_LICENSE_SERVER_URL=http://127.0.0.1:3000 ...
+DEFAULT_LICENSE_SERVER="https://api.vidyasetu.net"
+
 REINSTALL=0
 PRINT_CI=0
 for arg in "$@"; do
@@ -115,6 +121,70 @@ clean_stale_dmg() {
 }
 
 # ---------------------------------------------------------------------------
+# Prepare: .env (the login gate) + dependencies.
+# ---------------------------------------------------------------------------
+
+# Resolve the licence-server URL and make sure it is in .env, which is what Vite bakes
+# into the bundle. Precedence: an exported VITE_LICENSE_SERVER_URL > an existing .env
+# entry > the production default. An existing .env is never silently overwritten.
+ensure_env() {
+  local current=""
+  [[ -f .env ]] && current="$(sed -n 's/^[[:space:]]*VITE_LICENSE_SERVER_URL[[:space:]]*=[[:space:]]*//p' .env | tail -1 | tr -d '\r')"
+
+  local url="${VITE_LICENSE_SERVER_URL:-${current:-$DEFAULT_LICENSE_SERVER}}"
+  if [[ -z "$url" ]]; then
+    echo "✗ no licence server URL — the build would have NO login gate." >&2
+    exit 1
+  fi
+
+  if [[ "$url" != "$current" ]]; then
+    # Rewrite the key, preserving any other lines in an existing .env.
+    if [[ -f .env ]]; then
+      grep -v '^[[:space:]]*VITE_LICENSE_SERVER_URL[[:space:]]*=' .env > .env.tmp 2>/dev/null || true
+    else
+      printf '# Written by scripts/build-installers.sh — the backend the login gate talks to.\n' > .env.tmp
+    fi
+    printf 'VITE_LICENSE_SERVER_URL=%s\n' "$url" >> .env.tmp
+    mv .env.tmp .env
+  fi
+
+  LICENSE_URL="$url"
+  # Host only — that is what actually appears in the minified bundle.
+  LICENSE_HOST="$(printf '%s' "$url" | sed -E 's#^https?://##; s#/.*##')"
+  echo "› login gate → $LICENSE_URL"
+}
+
+# The desktop imports the shared engine from packages/core/src, which imports `exceljs`;
+# Rollup resolves that from an ancestor node_modules, so the REPO ROOT must be installed
+# too — otherwise the build dies with "Rollup failed to resolve import 'exceljs'".
+ensure_deps() {
+  local root
+  root="$(cd "$DESKTOP_DIR/../.." && pwd)"
+  if [[ ! -d "$root/node_modules" ]]; then
+    echo "› installing root deps (shared core engine)…"
+    (cd "$root" && npm install)
+  fi
+  if [[ ! -d "$DESKTOP_DIR/node_modules" ]]; then
+    echo "› installing desktop deps…"
+    npm install
+  fi
+}
+
+# The build SUCCEEDS whether or not the gate URL made it in — so check the bundle itself.
+# An installer that opens with no login is the failure we most need to catch here.
+verify_gate() {
+  if grep -rq "$LICENSE_HOST" dist 2>/dev/null; then
+    echo "› login gate baked into dist ($LICENSE_HOST) ✓"
+  else
+    echo "✗ login gate NOT in the built frontend — the app would run UNGATED. Aborting." >&2
+    exit 1
+  fi
+}
+
+ensure_env
+ensure_deps
+
+# ---------------------------------------------------------------------------
 # Build.
 # ---------------------------------------------------------------------------
 build_macos() {
@@ -138,6 +208,8 @@ case "$OS" in
     exit 1 ;;
   *) echo "✗ unsupported OS: $OS" >&2; exit 1 ;;
 esac
+
+verify_gate
 
 # ---------------------------------------------------------------------------
 # Report artifacts.
