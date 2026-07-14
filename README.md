@@ -149,7 +149,16 @@ Golden fixtures (CRIF's own sample files in `test/fixtures/`) are the primary co
 packages/core/    spec-driven engine (formats, encoding strategies, input, validation)
 packages/cli/     commander CLI
 packages/web/     local Node portal (server + single-page UI)
-scripts/          template generator
+packages/desktop/ Tauri desktop app (the shipped product; licence-gated)
+scripts/          template generator + ops scripts (crif-logs.sh)
 templates/        generated input workbooks
 test/             vitest specs + golden fixtures
 ```
+
+## Docs
+
+| Doc | Read it when |
+|---|---|
+| [Licence gate runbook](docs/LICENCE_GATE_RUNBOOK.md) | A customer can't log in, you're onboarding a company, or you're cutting a release — logs, users, sessions, version gate |
+| [Architecture & business](docs/ARCHITECTURE_AND_BUSINESS.md) | You need the system/commercial picture |
+| [Commercial flat pipeline](docs/COMMERCIAL_FLAT_PIPELINE.md) | You're working on the accountant Master Sheet conversion |
