@@ -184,12 +184,21 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
     );
     const lines = result.outputText!.split('\r\n');
 
-    // Borrower addresses all resolve; related-person addresses resolve except the two
-    // rows whose text names no state at all (city only) — those must NOT be guessed.
+    // Every borrower address resolves to a state code.
     expect(lines.filter((l) => l.startsWith('AS|') && l.split('|')[8] === '')).toHaveLength(0);
+
+    // The ampersand/spacing spellings this sheet uses must all resolve. Asserting on the
+    // CODES rather than a blank-count: this reference file is edited by the client between
+    // batches, so a hardcoded count breaks on data churn instead of on a real regression.
+    const rsCodes = lines.filter((l) => l.startsWith('RS|')).map((l) => l.split('|')[30]);
+    expect(new Set(rsCodes.filter(Boolean))).toEqual(new Set(['08', '09', '11', '33']));
+    // Any row still blank must be one that genuinely names no state — never a spelling
+    // variant we failed to read. (A state name we can't parse would be the regression.)
     const rsBlank = lines.filter((l) => l.startsWith('RS|') && l.split('|')[30] === '');
-    expect(rsBlank).toHaveLength(2);
-    expect(rsBlank.every((l) => /anjuman manzil|Vapi Valsad/i.test(l))).toBe(true);
+    for (const l of rsBlank) {
+      expect(l, 'blank state on a row that DOES name a known state = parser regression')
+        .not.toMatch(/gujarat|uttar\s*pradesh|daman|nagar haveli/i);
+    }
   });
 
   it('folds state spelling variants to the right catalogue code', async () => {

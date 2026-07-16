@@ -143,9 +143,17 @@ export async function readFlatExplodeWorkbook(
     // Header cells often carry an embedded legend after the label
     // ("Account Status 1. Open 2. Closed ..."), so match by normalized PREFIX:
     // the first column whose header starts with the (normalized) key text wins.
-    // Fold a header for matching: normalize() + drop spaces around "/" so
-    // "Business / Industry Type" and "Business/ Industry Type" compare equal.
-    const foldHeader = (s: string): string => normalize(s).replace(/\s*\/\s*/g, '/');
+    // Fold a header for matching: normalize(), then reduce every run of "/" and
+    // surrounding whitespace to ONE space. A slash is punctuation between words, not a
+    // distinguishing character, so "Business / Industry Type", "Business/ Industry Type"
+    // and "Business  Industry Type" (a sheet that dropped the slash — real, seen in the
+    // 9-July Master Sheet) all compare equal. Folding to a space rather than to "/" also
+    // keeps the key and the header comparable when only one side has the slash.
+    const foldHeader = (s: string): string =>
+      normalize(s)
+        .replace(/[\s/]*\/[\s/]*/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
     const hdrRow = ws.getRow(effHeaderRow);
     const normHeaders: Array<{ col: number; text: string }> = [];
     for (let c = 1; c <= ws.columnCount; c++) {
