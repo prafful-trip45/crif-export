@@ -1,3 +1,5 @@
+import type { Severity } from './result.js';
+
 /**
  * Core spec abstraction consumed by the whole engine.
  *
@@ -49,6 +51,12 @@ export interface FieldSpec {
   /** Delimited cap (validation only — pipe fields are not padded). */
   maxLength?: number;
   mandatory: MandatoryRule;
+  /**
+   * Severity when `mandatory` fails. Defaults to 'error' (blocks output). Use 'warning'
+   * for fields the bureau portal *usually* demands but has been observed to accept blank
+   * — the operator is told, but a legitimate submission is not halted.
+   */
+  mandatorySeverity?: Severity;
   /** Allowed enum codes -> human description; presence enables enum validation. */
   enum?: Record<string, string>;
   /** Fixed-width padding side + char. Defaults: string=right/space, numeric=left/'0'. */
@@ -126,6 +134,12 @@ export interface FormatSpec {
    * them), so line 0 = header + record0. Real CRIF Consumer flat output does this.
    */
   glueHeaderToFirstRecord?: boolean;
+  /**
+   * Cross-segment checks the per-field walk can't express (e.g. "at least one address
+   * must be the Registered Office"). Returns one message per violation; the validator
+   * reports them as errors against the borrower. Runs once per borrower.
+   */
+  checkBorrower?: (segments: ReadonlyArray<{ tag: string; values: Record<string, unknown> }>) => string[];
   /** Omit the trailer record entirely (flat Consumer output has none). */
   omitTrailer?: boolean;
   /**

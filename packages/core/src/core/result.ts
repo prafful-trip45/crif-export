@@ -6,7 +6,10 @@ export type ValidationRule =
   | 'cardinality'
   | 'date'
   | 'lookup'
-  | 'empty-input';
+  | 'empty-input'
+  /** A cross-segment rule the bureau portal enforces on ingestion (e.g. every borrower
+   * needs a Registered Office address) that the per-field walk can't express. */
+  | 'portal-mandatory';
 
 export type Severity = 'error' | 'warning';
 

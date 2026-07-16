@@ -33,8 +33,11 @@ describe('Full pipeline (workbook → bureau file)', () => {
   it('converts a clean Commercial workbook into a valid file', async () => {
     const buf = await buildWorkbook('commercial-ucrf', {
       BS: [{ _acNo: 'A1', _flag: 1, memberBranchCode: '110000', borrowerName: 'ACME PVT LTD', pan: 'AACCT1331J' }],
-      AS: [{ _acNo: 'A1', _flag: 2, addressLine1: '12 MG Road', cityTown: 'Pune', stateCode: '27', pinCode: '411001' }],
-      CR: [{ _acNo: 'A1', _flag: 4, accountNumber: '900001', sanctionDate: '14092013', sanctionedAmount: 5000000, currencyCode: 'INR' }],
+      // officeLocationType 01 = Registered Office: the portal rejects a borrower with no
+      // registered address, so a "clean" workbook must carry one.
+      AS: [{ _acNo: 'A1', _flag: 2, officeLocationType: '01', addressLine1: '12 MG Road', cityTown: 'Pune', stateCode: '27', pinCode: '411001' }],
+      // assetClassification 0001 = Standard: portal-mandatory on every credit facility.
+      CR: [{ _acNo: 'A1', _flag: 4, accountNumber: '900001', sanctionDate: '14092013', sanctionedAmount: 5000000, currencyCode: 'INR', assetClassification: '0001' }],
     });
 
     const result = await convert(buf, specFor('commercial-ucrf'), {

@@ -225,11 +225,19 @@ const REPAYMENT_FREQUENCY = buildLegend([
   { code: '08', num: '8', labels: ['Others'] },
 ]);
 
-/** Gender text -> CRIF code + courtesy prefix (RS / GS individuals). V3.9 uses title-case
- * (`Mr`/`Ms`); V3.10 upper-cases it (`MR`/`MS`) — selected via FlatOpts.prefixUpper. */
-const GENDER_CODE: Record<string, string> = { male: '01', female: '02', transgender: '03' };
-const GENDER_PREFIX: Record<string, string> = { male: 'Mr', female: 'Ms', transgender: '' };
-const GENDER_PREFIX_UPPER: Record<string, string> = { male: 'MR', female: 'MS', transgender: '' };
+/** Gender -> CRIF code. Sheets carry either the label ("Male") or the code itself
+ * ("01" — what the 9-July template's dropdown legend emits), so map via the legend
+ * table like every other coded column rather than keying on the label alone. */
+const GENDER = buildLegend([
+  { code: '01', num: '1', labels: ['Male', 'M'] },
+  { code: '02', num: '2', labels: ['Female', 'F'] },
+  { code: '03', num: '3', labels: ['Transgender'] },
+]);
+
+/** Courtesy prefix by CRIF gender code. V3.9 uses title-case (`Mr`/`Ms`); V3.10
+ * upper-cases it (`MR`/`MS`) — selected via FlatOpts.prefixUpper. */
+const GENDER_PREFIX: Record<string, string> = { '01': 'Mr', '02': 'Ms', '03': '' };
+const GENDER_PREFIX_UPPER: Record<string, string> = { '01': 'MR', '02': 'MS', '03': '' };
 
 /**
  * Per-version behaviour toggles. V3.9 (the legacy accountant convention) vs V3.10 (the
@@ -397,6 +405,15 @@ function resolveAddress(
 
 /* ---------- state lookup (CRIF catalogue 8.6, name -> code) ---------- */
 
+/**
+ * Fold a state name for matching: "&" and "and" are interchangeable in real sheets
+ * ("Dadra & Nagar Haveli" vs the catalogue's "Dadra and Nagar Haveli"), and the
+ * separator may lose its spaces entirely ("dadra& nagar haveli", "Uttarpradesh").
+ * Reducing both needle and haystack to bare letters makes all of those one key.
+ * Applied to needle AND haystack, so the two sides always agree.
+ */
+const foldState = (s: string): string => s.toLowerCase().replace(/&/g, 'and').replace(/[^a-z]/g, '');
+
 /** Canonical state names sorted longest-first so "Uttar Pradesh" wins over any
  * shorter partial; a few common spelling aliases fold onto the canonical name. */
 const STATE_ALIASES: Record<string, string> = {
@@ -406,8 +423,15 @@ const STATE_ALIASES: Record<string, string> = {
   uttaranchal: 'Uttarakhand',
   // common accountant misspellings seen in real Master Sheets
   gujrat: 'Gujarat',
+  gujart: 'Gujarat',
   maharastra: 'Maharashtra',
   karnatka: 'Karnataka',
+  // The V3.10 catalogue merged the two UTs into one long name ("Dadra and Nagar
+  // Haveli and Daman and Diu", code 08), but sheets still write the short pre-merger
+  // forms. Both short names remain valid input; 08/09 are both accepted (see the
+  // `crif-commercial-format` skill).
+  'dadra and nagar haveli': 'Dadra and Nagar Haveli and Daman and Diu',
+  'dadra nagar haveli': 'Dadra and Nagar Haveli and Daman and Diu',
 };
 const STATE_LOOKUP: Array<{ needle: string; name: string; code: string }> = (() => {
   const out: Array<{ needle: string; name: string; code: string }> = [];
@@ -419,13 +443,34 @@ const STATE_LOOKUP: Array<{ needle: string; name: string; code: string }> = (() 
   return out.sort((a, b) => b.needle.length - a.needle.length);
 })();
 
-/** Find the last-occurring known state name in a free-text address. */
+/**
+ * Find the last-occurring known state name in a free-text address.
+ *
+ * Matching happens on the FOLDED text (letters only, "&"->"and") so spelling variants
+ * like "Dadra & Nagar Haveli" / "dadra& nagar haveli" / "Uttarpradesh" all hit the
+ * catalogue name. `map` carries each folded character back to its index in the original
+ * string, so the returned `index` still points at the real state position — that's what
+ * splitAddress slices the city from.
+ */
 function findState(lower: string): { name: string; code: string; index: number } | undefined {
+  let folded = '';
+  const map: number[] = []; // folded char index -> original index
+  for (let i = 0; i < lower.length; i++) {
+    const piece = lower[i] === '&' ? 'and' : /[a-z]/.test(lower[i]!) ? lower[i]! : '';
+    for (let k = 0; k < piece.length; k++) {
+      folded += piece[k];
+      map.push(i);
+    }
+  }
+
   let best: { name: string; code: string; index: number } | undefined;
   for (const s of STATE_LOOKUP) {
-    const re = new RegExp(`\\b${s.needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
-    const m = re.exec(lower);
-    if (m && (!best || m.index > best.index)) best = { name: s.name, code: s.code, index: m.index };
+    const needle = foldState(s.needle);
+    if (needle === '') continue;
+    const at = folded.lastIndexOf(needle);
+    if (at < 0) continue;
+    const index = map[at] ?? 0;
+    if (!best || index > best.index) best = { name: s.name, code: s.code, index };
   }
   return best;
 }
@@ -451,6 +496,28 @@ const CITY_STATE: Record<string, { code: string; name: string }> = {
   silvassa: { code: '08', name: 'Dadra & Nagar Haveli' },
   silwasa: { code: '08', name: 'Dadra & Nagar Haveli' }, // common misspelling of Silvassa
 };
+
+/**
+ * Extract the PIN from a free-text address: the LAST standalone 6-digit run.
+ *
+ * Taking the first match reads a plot/survey number as the PIN — real addresses put the
+ * PIN at the end ("…Gidc Vapi, Gujarat-396195") but often carry longer digit runs earlier
+ * ("Plot No-1577158"). A bare /\d{6}\b/ is worse than first-vs-last: against a 7-digit run
+ * it matches the run's LAST six digits ("1577158" -> "577158"), inventing a PIN that was
+ * never typed. `(?<!\d)\d{6}(?!\d)` refuses to match inside a longer number, and scanning
+ * to the last hit picks the trailing PIN. (Portal rejected rows 14/65 of the 9-July batch
+ * over exactly this: reported PIN 577158 = Karnataka, against State 11 = Gujarat.)
+ */
+function findPin(text: string): string {
+  const runs = text.match(/(?<!\d)\d{6}(?!\d)/g);
+  return runs ? runs[runs.length - 1]! : '';
+}
+
+/** Index of the PIN returned by findPin (-1 when absent) — callers slice the city off it. */
+function findPinIndex(text: string): number {
+  const pin = findPin(text);
+  return pin === '' ? -1 : text.lastIndexOf(pin);
+}
 
 /** Strip a trailing country word + a " - <PIN>" / " <PIN>" tail from a city token. */
 function cleanCityToken(token: string): string {
@@ -483,7 +550,7 @@ function splitAddress(raw: FieldValue): {
   }
   const st = findState(full.toLowerCase());
   if (st) {
-    const pinCode = /(\d{6})\b/.exec(full)?.[1] ?? '';
+    const pinCode = findPin(full);
     const before = full.slice(0, st.index).replace(/[\s,\-]+$/, '');
     const lastComma = before.lastIndexOf(',');
     const city = (lastComma >= 0 ? before.slice(lastComma + 1) : before.split(/\s+/).pop() ?? '').trim();
@@ -493,10 +560,10 @@ function splitAddress(raw: FieldValue): {
   // Older "<street>, <City> - <PIN>. COUNTRY" form: strip the tail off Line 1.
   let s = full.replace(/[.,\s]*india\.?\s*$/i, '').trim();
   let city = '';
-  const pinMatch = /(\d{6})\b/.exec(s);
-  const pinCode = pinMatch?.[1] ?? '';
-  if (pinMatch) {
-    const beforePin = s.slice(0, pinMatch.index);
+  const pinCode = findPin(s);
+  const pinAt = findPinIndex(s);
+  if (pinAt >= 0) {
+    const beforePin = s.slice(0, pinAt);
     const lastComma = beforePin.lastIndexOf(',');
     if (lastComma >= 0) {
       city = cleanCityToken(beforePin.slice(lastComma + 1));
@@ -669,7 +736,7 @@ function explode(
 
   // ---- RS (related person) — only when a related person is present ----
   if (strNA(input.relatedName) !== '') {
-    const g = str(input.relatedGender).toLowerCase();
+    const g = mapLegend(GENDER, input.relatedGender) ?? '';
     const ra = resolveAddress(input.relatedAddress);
     seeds.push({
       tag: 'RS',
@@ -681,7 +748,7 @@ function explode(
         relationship: mapLegend(RELATIONSHIP_TYPE, input.relationshipType) ?? '',
         namePrefix: prefixMap[g] ?? '',
         fullName: strNA(input.relatedName),
-        gender: GENDER_CODE[g] ?? '',
+        gender: g,
         dateOfBirth: ddmmyyyy(input.relatedDob),
         rsPan: strNA(input.relatedPan),
         rsAddressLine1: ra.line1,
@@ -732,7 +799,7 @@ function explode(
   for (const gtor of readGuarantorBlocks(ctx.rawCells)) {
     const name = strNA(gtor.fullName) || strNA(gtor.entityName);
     if (name === '') continue;
-    const g = strNA(gtor.gender).toLowerCase();
+    const g = mapLegend(GENDER, gtor.gender) ?? '';
     const ga = resolveAddress(gtor.address);
     seeds.push({
       tag: 'GS',
@@ -743,7 +810,7 @@ function explode(
         gsRelatedType: gsRelType(mapLegend(RELATED_TYPE, gtor.type) ?? '', opts),
         gsNamePrefix: prefixMap[g] ?? '',
         gsFullName: name,
-        gsGender: GENDER_CODE[g] ?? '',
+        gsGender: g,
         gsDateOfBirth: ddmmyyyy(gtor.dob),
         gsPan: strNA(gtor.pan),
         gsAddressLine1: ga.line1,

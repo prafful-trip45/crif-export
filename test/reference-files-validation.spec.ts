@@ -33,7 +33,14 @@ const ref = (f: string) => join(REF, f);
 type Check =
   | { kind: 'golden'; input: string; output: string; format: FormatId; meta: FileMeta }
   | { kind: 'smoke'; input: string; format: FormatId; meta: FileMeta }
-  | { kind: 'reject'; input: string; format: FormatId; meta: FileMeta; why: string };
+  | { kind: 'reject'; input: string; format: FormatId; meta: FileMeta; why: string }
+  /**
+   * 4. known-defects — a REAL customer file that carries data defects the bureau
+   *    portal rejects. It must fail our validation for exactly the listed field keys
+   *    (a superset is drift worth reviewing; a subset means a rule silently stopped
+   *    firing). Distinct from `reject`, which covers deliberately-malformed inputs.
+   */
+  | { kind: 'known-defects'; input: string; format: FormatId; meta: FileMeta; fields: string[]; why: string };
 
 const META_DEFAULT: FileMeta = {
   memberId: 'NB1234567',
@@ -61,13 +68,27 @@ const CHECKS: Check[] = [
   { kind: 'smoke', input: 'consumer_input_failing.xlsx', format: 'consumer-ucrf12-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'consumer-input-2.xlsx', format: 'consumer-ucrf12-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'client-input-commercial-2.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
-  { kind: 'smoke', input: 'Captree_commercial_input.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  {
+    kind: 'known-defects',
+    input: 'Captree_commercial_input.xlsx',
+    format: 'commercial-ucrf-flat',
+    meta: META_DEFAULT,
+    fields: ['relationship'],
+    why: 'Relationship Type column is blank for every row; the paired accepted output has it populated on all 19 RS lines, so the sheet is missing data the portal demands.',
+  },
   // 1 Jul batch: exercises guarantor (GS) + security (SS) blocks and both guarantor
   // layouts. Smoke-only — the paired .txt outputs are hand-finalized (inconsistent
   // relationship codes / address casing / stray whitespace) so they are NOT byte-
   // reproducible; see the crif-commercial-format skill and COMMERCIAL_FLAT_PIPELINE.md.
   { kind: 'smoke', input: 'commercial_input_1Jul.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
-  { kind: 'smoke', input: 'commercial_input_1Jul_OD_Loan.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  {
+    kind: 'known-defects',
+    input: 'commercial_input_1Jul_OD_Loan.xlsx',
+    format: 'commercial-ucrf-flat',
+    meta: META_DEFAULT,
+    fields: ['assetClassification', 'relationship'],
+    why: 'Hand-finalized OD sheet (see the crif-commercial-format skill): identical rows carry different codes and several rows omit Asset Classification / Relationship entirely.',
+  },
   // 31 March + 30 June: very messy real sheets ("-" placeholders, "PVT LTD", natural
   // dates like "04th June 2025", jumbled guarantor cells). Smoke-only — the paired
   // outputs are hand-curated; the value here is that they now convert with ZERO errors.
@@ -76,7 +97,15 @@ const CHECKS: Check[] = [
   // 9 Jul NEW_CIC sheet: two borrowers write comma-less addresses with no state name
   // ("…Near Modern English School Vapi 396191") — guards the splitAddress fallback
   // that used to leave Address Line 1 blank (2 validation errors, file not generated).
-  { kind: 'smoke', input: 'NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx', format: 'commercial-ucrf-flat-v310', meta: META_DEFAULT },
+  {
+    kind: 'known-defects',
+    input: 'NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx',
+    format: 'commercial-ucrf-flat-v310',
+    meta: META_DEFAULT,
+    // '' = the borrower-level Registered Office rule (no single field to blame).
+    fields: ['', 'assetClassification', 'relationship'],
+    why: 'The 9-July batch the portal rejected 73/73 (see training-references/portal-submission-report/). 55 borrowers have no Location Type 01 address; the guarantor block is shifted a column in the source sheet. Must never validate clean again.',
+  },
 ];
 
 const err = (r: any) => (r.report?.issues ?? []).filter((i: any) => i.severity === 'error');
@@ -104,6 +133,16 @@ describe('reference-files pre-rollout validation', () => {
         const errors = err(result);
         expect(errors, `validation errors: ${errors.map((e: any) => e.message).join('; ')}`).toEqual([]);
         expect(String(result.outputText ?? '').length).toBeGreaterThan(0);
+      });
+    } else if (c.kind === 'known-defects') {
+      it(`known defects blocked: ${c.input}`, async () => {
+        const result: any = await convert(readFileSync(ref(c.input)), getFormat(c.format), c.meta);
+        const errors = err(result);
+        // The whole point: this file must NOT sail through as it did on 9 July.
+        expect(errors.length, `expected ${c.why}`).toBeGreaterThan(0);
+        expect(result.output, 'a file with portal-fatal defects must not be written').toBeUndefined();
+        // Pin the exact rules; drift in either direction is worth a human look.
+        expect([...new Set(errors.map((e: any) => e.fieldKey))].sort()).toEqual([...c.fields].sort());
       });
     }
   }
