@@ -649,6 +649,10 @@ const COLUMN_HEADERS: Record<string, string> = {
   'Amount Overdue / Limit Overdue': 'amountOverdue',
   'Account Status': 'accountStatus',
   'Wilful Default Status': 'wilfulDefault',
+  // V3.10 §7.5 field 36, required when the status is 1. Templates that keep it in its own
+  // column bind here; the common Master Sheet merges it into the status header instead, so
+  // this stays unmatched and `checkCommercialBorrower` blocks rather than guessing a date.
+  'Date Classified as Wilful Default': 'wilfulDefaultDate',
   'Suit Filed Status': 'suitFiledStatus',
   'Suit Reference Number': 'suitReferenceNumber',
   'Suit Amount in Rupees': 'suitAmount',
@@ -784,10 +788,13 @@ function explode(
       assetClassification: mapLegend(ASSET_CLASSIFICATION, input.assetClassification) ?? '',
       amountOverdue: rupees(input.amountOverdue) || '0',
       accountStatus: mapLegend(ACCOUNT_STATUS, input.accountStatus) ?? '',
-      // Wilful-default status 0 = No; the DATE slot is likewise a literal "0" (both
-      // goldens do this — FLAT_BODY relaxes that field to string); suit-filed 00 = none.
+      // Wilful-default status 0 = No; suit-filed 00 = none. When the sheet carries a real
+      // classification date (V3.10 §7.5 field 36, required if the status is 1) it wins;
+      // otherwise fall back to the per-version empty slot — a literal "0" in V3.9 (both
+      // goldens do this — FLAT_BODY relaxes that field to string), blank in V3.10.
+      // A status of 1 with no date is caught by `checkCommercialBorrower`, not patched here.
       wilfulDefaultStatus: wilfulCode(input.wilfulDefault) || '0',
-      wilfulDefaultDate: opts.wilfulDateZero ? '0' : '',
+      wilfulDefaultDate: ddmmyyyy(input.wilfulDefaultDate) || (opts.wilfulDateZero ? '0' : ''),
       suitFiledStatus: '00',
     }),
   });

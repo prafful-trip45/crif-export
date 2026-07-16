@@ -361,7 +361,7 @@ const TS: SegmentSpec = {
  * than auto-corrected: relabelling a warehouse/plant address as the registered office
  * would assert a legal fact the sheet doesn't support — a human has to supply the real one.
  */
-export const checkCommercialBorrower = (
+const checkRegisteredOffice = (
   segments: ReadonlyArray<{ tag: string; values: Record<string, unknown> }>,
 ): string[] => {
   const addresses = segments.filter((s) => s.tag === 'AS');
@@ -375,6 +375,40 @@ export const checkCommercialBorrower = (
       'The bureau rejects the entire borrower record without one.',
   ];
 };
+
+/**
+ * V3.10 §7.5 field 36: "Date Classified as Wilful Default" is Required-Conditionally —
+ * it must be reported when field 35 Wilful Default Status is "1 = Wilful Defaulter".
+ *
+ * The accountant Master Sheet merges both CRIF fields into ONE column ("Wilful Default
+ * Status / YesNo / Date Classified as Wilful Default If yes") that in practice only ever
+ * carries 0 or 1, so the date has nowhere to live and reaches us blank. Neither repair is
+ * ours to make: inventing a classification date, or downgrading the status to 0, each
+ * misstates a borrower's wilful-default standing to the bureau — a legal assertion about a
+ * real business. So we block and name the missing column instead.
+ */
+const checkWilfulDefaultDate = (
+  segments: ReadonlyArray<{ tag: string; values: Record<string, unknown> }>,
+): string[] => {
+  const messages: string[] = [];
+  for (const cr of segments.filter((s) => s.tag === 'CR')) {
+    const status = String(cr.values.wilfulDefaultStatus ?? '').trim();
+    const date = String(cr.values.wilfulDefaultDate ?? '').trim();
+    // A literal "0" is the V3.9 placeholder for "no date", not a real date.
+    if (status !== '1' || (date !== '' && date !== '0')) continue;
+    messages.push(
+      'Wilful Default Status is "1 = Wilful Defaulter" but "Date Classified as Wilful ' +
+        'Default" is blank. The bureau requires the date whenever the status is 1 and ' +
+        'rejects the credit facility without it. Add the classification date to the sheet ' +
+        '(DD/MM/YYYY), or set the status to 0 if this account is not in wilful default.',
+    );
+  }
+  return messages;
+};
+
+export const checkCommercialBorrower = (
+  segments: ReadonlyArray<{ tag: string; values: Record<string, unknown> }>,
+): string[] => [...checkRegisteredOffice(segments), ...checkWilfulDefaultDate(segments)];
 
 export const commercialUcrf: FormatSpec = {
   id: 'commercial-ucrf',

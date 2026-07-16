@@ -194,6 +194,29 @@ describe('reference-files pre-rollout validation', () => {
     expect(out[6]).toBe('TS|1|1|');
   });
 
+  /**
+   * Regression for the 15-July portal rejection (73/73 borrowers), replayed against the
+   * exact sheet that produced it. See training-references/portal-submission-report/.
+   *
+   * Both blocking rules are pinned to the counts the source data predicts, so a future
+   * change that silently stops emitting either one fails here rather than at the bureau:
+   *   - 55 borrowers carry only Location Type 03/04 (no Registered Office) -> portal's
+   *     "not a single valid address found" record-reject.
+   *   - 18 rows report Wilful Default Status 1 with no classification date (the Master
+   *     Sheet merges both CRIF fields into one 0/1 column) -> V3.10 §7.5 field 36.
+   * The portal reported 54 address rejects to our 55: it stops at the first fatal reject
+   * per borrower, so its counts are a floor, not an exact match.
+   */
+  it('blocks the 15-July rejection batch: no Registered Office (55) + wilful-default date (18)', async () => {
+    const buf = readFileSync(ref('NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx'));
+    const result: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), META_DEFAULT);
+    // Blocking: no output may be generated for a batch the bureau would reject.
+    expect(result.output).toBeUndefined();
+    const errors = err(result);
+    expect(errors.filter((e: any) => e.message.includes('Registered Office'))).toHaveLength(55);
+    expect(errors.filter((e: any) => e.message.includes('Wilful Default Status'))).toHaveLength(18);
+  });
+
   // Regression: an expanded template whose header row is NOT the canonical top block, so
   // the fixed B5/B6/B7 header-cell addresses land on DATA (e.g. B6/B7 are PANs). Those
   // must NOT be taken as reporting/creation dates (a non-date there previously crashed
