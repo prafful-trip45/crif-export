@@ -1,3 +1,4 @@
+  
 import type {
   FieldValue,
   FlatExplodeContext,
@@ -53,14 +54,31 @@ interface LegendEntry {
   labels: string[];
 }
 
-function buildLegend(entries: LegendEntry[]): Map<string, string> {
-  const m = new Map<string, string>();
+/**
+ * A legend accepts three spellings of the same value: the CRIF wire code, the
+ * Master-Sheet dropdown number, or a label. Codes and numbers are kept in SEPARATE
+ * maps because their keyspaces overlap: "11" is the CODE for Private Limited but
+ * also the dropdown NUM for Self Help Group (85), and "12" is the CODE for Public
+ * Limited and the NUM for Individual (90). A single map lets whichever entry is
+ * declared last silently win, so a sheet carrying real CRIF codes mis-maps.
+ * `mapLegend` therefore resolves code -> label -> num, in that order.
+ */
+interface Legend {
+  byCode: Map<string, string>;
+  byNum: Map<string, string>;
+  byLabel: Map<string, string>;
+}
+
+function buildLegend(entries: LegendEntry[]): Legend {
+  const byCode = new Map<string, string>();
+  const byNum = new Map<string, string>();
+  const byLabel = new Map<string, string>();
   for (const e of entries) {
-    m.set(e.num, e.code);
-    m.set(e.code, e.code); // already-CRIF-coded value passes through
-    for (const l of e.labels) m.set(normalize(l), e.code);
+    byCode.set(e.code, e.code); // already-CRIF-coded value passes through
+    byNum.set(e.num, e.code);
+    for (const l of e.labels) byLabel.set(normalize(l), e.code);
   }
-  return m;
+  return { byCode, byNum, byLabel };
 }
 
 /**
@@ -259,11 +277,14 @@ const codeKey = (v: FieldValue): string => {
   return m ? m[1]! : s;
 };
 
-/** Map a legend value (number OR label) via a table; undefined if unrecognized. */
-function mapLegend(table: Map<string, string>, v: FieldValue): string | undefined {
+/** Map a legend value (code, number, OR label) via a table; undefined if unrecognized.
+ * Order matters: an exact CRIF code wins over a dropdown number, because the two
+ * keyspaces overlap (see buildLegend). Labels sit between — they are unambiguous. */
+function mapLegend(table: Legend, v: FieldValue): string | undefined {
   const s = str(v);
   if (s === '') return undefined;
-  return table.get(codeKey(v)) ?? table.get(normalize(s)) ?? undefined;
+  const key = codeKey(v);
+  return table.byCode.get(key) ?? table.byLabel.get(normalize(s)) ?? table.byNum.get(key) ?? undefined;
 }
 
 /** Normalize a label for tolerant matching: lowercase, collapse spaces, drop quotes,
@@ -406,8 +427,17 @@ const STATE_ALIASES: Record<string, string> = {
   uttaranchal: 'Uttarakhand',
   // common accountant misspellings seen in real Master Sheets
   gujrat: 'Gujarat',
+  gujart: 'Gujarat',
   maharastra: 'Maharashtra',
   karnatka: 'Karnataka',
+  // V3.10 folded the old 08 (Dadra and Nagar Haveli) and 09 (Daman and Diu) into a
+  // single combined territory. Sheets still carry the pre-merger short forms, plus
+  // the "Nagar"-dropping variant and the capital's name.
+  'dadra and nagar haveli': 'Dadra and Nagar Haveli and Daman and Diu',
+  'dadra & nagar haveli': 'Dadra and Nagar Haveli and Daman and Diu',
+  'dadra and haveli': 'Dadra and Nagar Haveli and Daman and Diu',
+  'dadra & haveli': 'Dadra and Nagar Haveli and Daman and Diu',
+  silvassa: 'Dadra and Nagar Haveli and Daman and Diu',
 };
 const STATE_LOOKUP: Array<{ needle: string; name: string; code: string }> = (() => {
   const out: Array<{ needle: string; name: string; code: string }> = [];
@@ -421,13 +451,24 @@ const STATE_LOOKUP: Array<{ needle: string; name: string; code: string }> = (() 
 
 /** Find the last-occurring known state name in a free-text address. */
 function findState(lower: string): { name: string; code: string; index: number } | undefined {
-  let best: { name: string; code: string; index: number } | undefined;
+  let best: { name: string; code: string; index: number; end: number } | undefined;
   for (const s of STATE_LOOKUP) {
-    const re = new RegExp(`\\b${s.needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+    // Leading `\b` keeps a name from matching inside a longer word ("goa" in "goanna").
+    // The trailing edge instead requires a non-letter, because accountants routinely
+    // run the PIN straight onto the state ("…Gujarat396191") where `\b` cannot match.
+    const re = new RegExp(`\\b${s.needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`);
     const m = re.exec(lower);
-    if (m && (!best || m.index > best.index)) best = { name: s.name, code: s.code, index: m.index };
+    if (!m) continue;
+    const end = m.index + m[0].length;
+    // Rank by where the match ENDS, not where it starts. One catalogue name can contain
+    // another ("Daman and Diu" sits inside "Dadra and Nagar Haveli and Daman and Diu"),
+    // and the contained one starts later — ranking on start index would let it win.
+    // On a tie, the earlier start is the longer (enclosing) name.
+    if (!best || end > best.end || (end === best.end && m.index < best.index)) {
+      best = { name: s.name, code: s.code, index: m.index, end };
+    }
   }
-  return best;
+  return best ? { name: best.name, code: best.code, index: best.index } : undefined;
 }
 
 /**
@@ -958,3 +999,4 @@ export const commercialUcrfFlatV310: FormatSpec = {
     explode: (input, ctx) => explode(input, ctx, V310_OPTS),
   },
 };
+
