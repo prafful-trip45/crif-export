@@ -1,3 +1,4 @@
+  
 import type {
   FieldValue,
   FlatExplodeContext,
@@ -53,14 +54,31 @@ interface LegendEntry {
   labels: string[];
 }
 
-function buildLegend(entries: LegendEntry[]): Map<string, string> {
-  const m = new Map<string, string>();
+/**
+ * A legend accepts three spellings of the same value: the CRIF wire code, the
+ * Master-Sheet dropdown number, or a label. Codes and numbers are kept in SEPARATE
+ * maps because their keyspaces overlap: "11" is the CODE for Private Limited but
+ * also the dropdown NUM for Self Help Group (85), and "12" is the CODE for Public
+ * Limited and the NUM for Individual (90). A single map lets whichever entry is
+ * declared last silently win, so a sheet carrying real CRIF codes mis-maps.
+ * `mapLegend` therefore resolves code -> label -> num, in that order.
+ */
+interface Legend {
+  byCode: Map<string, string>;
+  byNum: Map<string, string>;
+  byLabel: Map<string, string>;
+}
+
+function buildLegend(entries: LegendEntry[]): Legend {
+  const byCode = new Map<string, string>();
+  const byNum = new Map<string, string>();
+  const byLabel = new Map<string, string>();
   for (const e of entries) {
-    m.set(e.num, e.code);
-    m.set(e.code, e.code); // already-CRIF-coded value passes through
-    for (const l of e.labels) m.set(normalize(l), e.code);
+    byCode.set(e.code, e.code); // already-CRIF-coded value passes through
+    byNum.set(e.num, e.code);
+    for (const l of e.labels) byLabel.set(normalize(l), e.code);
   }
-  return m;
+  return { byCode, byNum, byLabel };
 }
 
 /**
@@ -225,19 +243,11 @@ const REPAYMENT_FREQUENCY = buildLegend([
   { code: '08', num: '8', labels: ['Others'] },
 ]);
 
-/** Gender -> CRIF code. Sheets carry either the label ("Male") or the code itself
- * ("01" — what the 9-July template's dropdown legend emits), so map via the legend
- * table like every other coded column rather than keying on the label alone. */
-const GENDER = buildLegend([
-  { code: '01', num: '1', labels: ['Male', 'M'] },
-  { code: '02', num: '2', labels: ['Female', 'F'] },
-  { code: '03', num: '3', labels: ['Transgender'] },
-]);
-
-/** Courtesy prefix by CRIF gender code. V3.9 uses title-case (`Mr`/`Ms`); V3.10
- * upper-cases it (`MR`/`MS`) — selected via FlatOpts.prefixUpper. */
-const GENDER_PREFIX: Record<string, string> = { '01': 'Mr', '02': 'Ms', '03': '' };
-const GENDER_PREFIX_UPPER: Record<string, string> = { '01': 'MR', '02': 'MS', '03': '' };
+/** Gender text -> CRIF code + courtesy prefix (RS / GS individuals). V3.9 uses title-case
+ * (`Mr`/`Ms`); V3.10 upper-cases it (`MR`/`MS`) — selected via FlatOpts.prefixUpper. */
+const GENDER_CODE: Record<string, string> = { male: '01', female: '02', transgender: '03' };
+const GENDER_PREFIX: Record<string, string> = { male: 'Mr', female: 'Ms', transgender: '' };
+const GENDER_PREFIX_UPPER: Record<string, string> = { male: 'MR', female: 'MS', transgender: '' };
 
 /**
  * Per-version behaviour toggles. V3.9 (the legacy accountant convention) vs V3.10 (the
@@ -267,11 +277,14 @@ const codeKey = (v: FieldValue): string => {
   return m ? m[1]! : s;
 };
 
-/** Map a legend value (number OR label) via a table; undefined if unrecognized. */
-function mapLegend(table: Map<string, string>, v: FieldValue): string | undefined {
+/** Map a legend value (code, number, OR label) via a table; undefined if unrecognized.
+ * Order matters: an exact CRIF code wins over a dropdown number, because the two
+ * keyspaces overlap (see buildLegend). Labels sit between — they are unambiguous. */
+function mapLegend(table: Legend, v: FieldValue): string | undefined {
   const s = str(v);
   if (s === '') return undefined;
-  return table.get(codeKey(v)) ?? table.get(normalize(s)) ?? undefined;
+  const key = codeKey(v);
+  return table.byCode.get(key) ?? table.byLabel.get(normalize(s)) ?? table.byNum.get(key) ?? undefined;
 }
 
 /** Normalize a label for tolerant matching: lowercase, collapse spaces, drop quotes,
@@ -405,15 +418,6 @@ function resolveAddress(
 
 /* ---------- state lookup (CRIF catalogue 8.6, name -> code) ---------- */
 
-/**
- * Fold a state name for matching: "&" and "and" are interchangeable in real sheets
- * ("Dadra & Nagar Haveli" vs the catalogue's "Dadra and Nagar Haveli"), and the
- * separator may lose its spaces entirely ("dadra& nagar haveli", "Uttarpradesh").
- * Reducing both needle and haystack to bare letters makes all of those one key.
- * Applied to needle AND haystack, so the two sides always agree.
- */
-const foldState = (s: string): string => s.toLowerCase().replace(/&/g, 'and').replace(/[^a-z]/g, '');
-
 /** Canonical state names sorted longest-first so "Uttar Pradesh" wins over any
  * shorter partial; a few common spelling aliases fold onto the canonical name. */
 const STATE_ALIASES: Record<string, string> = {
@@ -426,12 +430,14 @@ const STATE_ALIASES: Record<string, string> = {
   gujart: 'Gujarat',
   maharastra: 'Maharashtra',
   karnatka: 'Karnataka',
-  // The V3.10 catalogue merged the two UTs into one long name ("Dadra and Nagar
-  // Haveli and Daman and Diu", code 08), but sheets still write the short pre-merger
-  // forms. Both short names remain valid input; 08/09 are both accepted (see the
-  // `crif-commercial-format` skill).
+  // V3.10 folded the old 08 (Dadra and Nagar Haveli) and 09 (Daman and Diu) into a
+  // single combined territory. Sheets still carry the pre-merger short forms, plus
+  // the "Nagar"-dropping variant and the capital's name.
   'dadra and nagar haveli': 'Dadra and Nagar Haveli and Daman and Diu',
-  'dadra nagar haveli': 'Dadra and Nagar Haveli and Daman and Diu',
+  'dadra & nagar haveli': 'Dadra and Nagar Haveli and Daman and Diu',
+  'dadra and haveli': 'Dadra and Nagar Haveli and Daman and Diu',
+  'dadra & haveli': 'Dadra and Nagar Haveli and Daman and Diu',
+  silvassa: 'Dadra and Nagar Haveli and Daman and Diu',
 };
 const STATE_LOOKUP: Array<{ needle: string; name: string; code: string }> = (() => {
   const out: Array<{ needle: string; name: string; code: string }> = [];
@@ -443,36 +449,26 @@ const STATE_LOOKUP: Array<{ needle: string; name: string; code: string }> = (() 
   return out.sort((a, b) => b.needle.length - a.needle.length);
 })();
 
-/**
- * Find the last-occurring known state name in a free-text address.
- *
- * Matching happens on the FOLDED text (letters only, "&"->"and") so spelling variants
- * like "Dadra & Nagar Haveli" / "dadra& nagar haveli" / "Uttarpradesh" all hit the
- * catalogue name. `map` carries each folded character back to its index in the original
- * string, so the returned `index` still points at the real state position — that's what
- * splitAddress slices the city from.
- */
+/** Find the last-occurring known state name in a free-text address. */
 function findState(lower: string): { name: string; code: string; index: number } | undefined {
-  let folded = '';
-  const map: number[] = []; // folded char index -> original index
-  for (let i = 0; i < lower.length; i++) {
-    const piece = lower[i] === '&' ? 'and' : /[a-z]/.test(lower[i]!) ? lower[i]! : '';
-    for (let k = 0; k < piece.length; k++) {
-      folded += piece[k];
-      map.push(i);
+  let best: { name: string; code: string; index: number; end: number } | undefined;
+  for (const s of STATE_LOOKUP) {
+    // Leading `\b` keeps a name from matching inside a longer word ("goa" in "goanna").
+    // The trailing edge instead requires a non-letter, because accountants routinely
+    // run the PIN straight onto the state ("…Gujarat396191") where `\b` cannot match.
+    const re = new RegExp(`\\b${s.needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`);
+    const m = re.exec(lower);
+    if (!m) continue;
+    const end = m.index + m[0].length;
+    // Rank by where the match ENDS, not where it starts. One catalogue name can contain
+    // another ("Daman and Diu" sits inside "Dadra and Nagar Haveli and Daman and Diu"),
+    // and the contained one starts later — ranking on start index would let it win.
+    // On a tie, the earlier start is the longer (enclosing) name.
+    if (!best || end > best.end || (end === best.end && m.index < best.index)) {
+      best = { name: s.name, code: s.code, index: m.index, end };
     }
   }
-
-  let best: { name: string; code: string; index: number } | undefined;
-  for (const s of STATE_LOOKUP) {
-    const needle = foldState(s.needle);
-    if (needle === '') continue;
-    const at = folded.lastIndexOf(needle);
-    if (at < 0) continue;
-    const index = map[at] ?? 0;
-    if (!best || index > best.index) best = { name: s.name, code: s.code, index };
-  }
-  return best;
+  return best ? { name: best.name, code: best.code, index: best.index } : undefined;
 }
 
 /**
@@ -492,32 +488,7 @@ const CITY_STATE: Record<string, { code: string; name: string }> = {
   chennai: { code: '31', name: 'Tamil Nadu' },
   kolkata: { code: '35', name: 'West Bengal' },
   hyderabad: { code: '36', name: 'Telangana' },
-  vapi: { code: '11', name: 'Gujarat' },
-  silvassa: { code: '08', name: 'Dadra & Nagar Haveli' },
-  silwasa: { code: '08', name: 'Dadra & Nagar Haveli' }, // common misspelling of Silvassa
 };
-
-/**
- * Extract the PIN from a free-text address: the LAST standalone 6-digit run.
- *
- * Taking the first match reads a plot/survey number as the PIN — real addresses put the
- * PIN at the end ("…Gidc Vapi, Gujarat-396195") but often carry longer digit runs earlier
- * ("Plot No-1577158"). A bare /\d{6}\b/ is worse than first-vs-last: against a 7-digit run
- * it matches the run's LAST six digits ("1577158" -> "577158"), inventing a PIN that was
- * never typed. `(?<!\d)\d{6}(?!\d)` refuses to match inside a longer number, and scanning
- * to the last hit picks the trailing PIN. (Portal rejected rows 14/65 of the 9-July batch
- * over exactly this: reported PIN 577158 = Karnataka, against State 11 = Gujarat.)
- */
-function findPin(text: string): string {
-  const runs = text.match(/(?<!\d)\d{6}(?!\d)/g);
-  return runs ? runs[runs.length - 1]! : '';
-}
-
-/** Index of the PIN returned by findPin (-1 when absent) — callers slice the city off it. */
-function findPinIndex(text: string): number {
-  const pin = findPin(text);
-  return pin === '' ? -1 : text.lastIndexOf(pin);
-}
 
 /** Strip a trailing country word + a " - <PIN>" / " <PIN>" tail from a city token. */
 function cleanCityToken(token: string): string {
@@ -550,7 +521,7 @@ function splitAddress(raw: FieldValue): {
   }
   const st = findState(full.toLowerCase());
   if (st) {
-    const pinCode = findPin(full);
+    const pinCode = /(\d{6})\b/.exec(full)?.[1] ?? '';
     const before = full.slice(0, st.index).replace(/[\s,\-]+$/, '');
     const lastComma = before.lastIndexOf(',');
     const city = (lastComma >= 0 ? before.slice(lastComma + 1) : before.split(/\s+/).pop() ?? '').trim();
@@ -560,18 +531,17 @@ function splitAddress(raw: FieldValue): {
   // Older "<street>, <City> - <PIN>. COUNTRY" form: strip the tail off Line 1.
   let s = full.replace(/[.,\s]*india\.?\s*$/i, '').trim();
   let city = '';
-  const pinCode = findPin(s);
-  const pinAt = findPinIndex(s);
-  if (pinAt >= 0) {
-    const beforePin = s.slice(0, pinAt);
+  const pinMatch = /(\d{6})\b/.exec(s);
+  const pinCode = pinMatch?.[1] ?? '';
+  if (pinMatch) {
+    const beforePin = s.slice(0, pinMatch.index);
     const lastComma = beforePin.lastIndexOf(',');
     if (lastComma >= 0) {
       city = cleanCityToken(beforePin.slice(lastComma + 1));
       s = beforePin.slice(0, lastComma).replace(/[\s,]+$/, '');
     } else {
-      // Comma-less "<address words> <City> <PIN>" (e.g. "…English School Vapi 396191"):
-      // the last word before the PIN is the city; Line 1 keeps the full text.
-      city = cleanCityToken(beforePin.trim().split(/\s+/).pop() ?? '');
+      city = cleanCityToken(beforePin);
+      s = '';
     }
   }
   const looked = CITY_STATE[city.toLowerCase()];
@@ -649,10 +619,6 @@ const COLUMN_HEADERS: Record<string, string> = {
   'Amount Overdue / Limit Overdue': 'amountOverdue',
   'Account Status': 'accountStatus',
   'Wilful Default Status': 'wilfulDefault',
-  // V3.10 §7.5 field 36, required when the status is 1. Templates that keep it in its own
-  // column bind here; the common Master Sheet merges it into the status header instead, so
-  // this stays unmatched and `checkCommercialBorrower` blocks rather than guessing a date.
-  'Date Classified as Wilful Default': 'wilfulDefaultDate',
   'Suit Filed Status': 'suitFiledStatus',
   'Suit Reference Number': 'suitReferenceNumber',
   'Suit Amount in Rupees': 'suitAmount',
@@ -740,7 +706,7 @@ function explode(
 
   // ---- RS (related person) — only when a related person is present ----
   if (strNA(input.relatedName) !== '') {
-    const g = mapLegend(GENDER, input.relatedGender) ?? '';
+    const g = str(input.relatedGender).toLowerCase();
     const ra = resolveAddress(input.relatedAddress);
     seeds.push({
       tag: 'RS',
@@ -752,7 +718,7 @@ function explode(
         relationship: mapLegend(RELATIONSHIP_TYPE, input.relationshipType) ?? '',
         namePrefix: prefixMap[g] ?? '',
         fullName: strNA(input.relatedName),
-        gender: g,
+        gender: GENDER_CODE[g] ?? '',
         dateOfBirth: ddmmyyyy(input.relatedDob),
         rsPan: strNA(input.relatedPan),
         rsAddressLine1: ra.line1,
@@ -788,13 +754,10 @@ function explode(
       assetClassification: mapLegend(ASSET_CLASSIFICATION, input.assetClassification) ?? '',
       amountOverdue: rupees(input.amountOverdue) || '0',
       accountStatus: mapLegend(ACCOUNT_STATUS, input.accountStatus) ?? '',
-      // Wilful-default status 0 = No; suit-filed 00 = none. When the sheet carries a real
-      // classification date (V3.10 §7.5 field 36, required if the status is 1) it wins;
-      // otherwise fall back to the per-version empty slot — a literal "0" in V3.9 (both
-      // goldens do this — FLAT_BODY relaxes that field to string), blank in V3.10.
-      // A status of 1 with no date is caught by `checkCommercialBorrower`, not patched here.
+      // Wilful-default status 0 = No; the DATE slot is likewise a literal "0" (both
+      // goldens do this — FLAT_BODY relaxes that field to string); suit-filed 00 = none.
       wilfulDefaultStatus: wilfulCode(input.wilfulDefault) || '0',
-      wilfulDefaultDate: ddmmyyyy(input.wilfulDefaultDate) || (opts.wilfulDateZero ? '0' : ''),
+      wilfulDefaultDate: opts.wilfulDateZero ? '0' : '',
       suitFiledStatus: '00',
     }),
   });
@@ -806,7 +769,7 @@ function explode(
   for (const gtor of readGuarantorBlocks(ctx.rawCells)) {
     const name = strNA(gtor.fullName) || strNA(gtor.entityName);
     if (name === '') continue;
-    const g = mapLegend(GENDER, gtor.gender) ?? '';
+    const g = strNA(gtor.gender).toLowerCase();
     const ga = resolveAddress(gtor.address);
     seeds.push({
       tag: 'GS',
@@ -817,7 +780,7 @@ function explode(
         gsRelatedType: gsRelType(mapLegend(RELATED_TYPE, gtor.type) ?? '', opts),
         gsNamePrefix: prefixMap[g] ?? '',
         gsFullName: name,
-        gsGender: g,
+        gsGender: GENDER_CODE[g] ?? '',
         gsDateOfBirth: ddmmyyyy(gtor.dob),
         gsPan: strNA(gtor.pan),
         gsAddressLine1: ga.line1,
@@ -1036,3 +999,4 @@ export const commercialUcrfFlatV310: FormatSpec = {
     explode: (input, ctx) => explode(input, ctx, V310_OPTS),
   },
 };
+
