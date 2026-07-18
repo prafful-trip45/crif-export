@@ -32,7 +32,13 @@
 		"MIN_VERSION": "0.1.0",
 		"LATEST_VERSION": "0.2.1",
 		"DOWNLOAD_URL": "https://cic.vidyasetu.net/download",
-		"ACCESS_TTL_SECONDS": "900",
+		// Access token: 1 DAY. Long on purpose — it cuts /refresh round-trips to ~1/day
+		// per user instead of one every 15 min. This does NOT weaken single-session
+		// enforcement: an evicted device is caught by the HEARTBEAT (`checkSession`
+		// compares the token's `sid` to the stored one), not by token expiry — so a
+		// still-valid-but-evicted token is rejected on its next heartbeat regardless.
+		"ACCESS_TTL_SECONDS": "86400",
+		// Refresh token: 30 days, rotated single-use on every /refresh.
 		"REFRESH_TTL_SECONDS": "2592000"
 	}
 	// Secret (NOT in this file):  npx wrangler secret put JWT_SECRET

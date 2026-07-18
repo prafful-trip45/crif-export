@@ -5,7 +5,7 @@ import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
 import { convert } from '../packages/core/src/core/pipeline.js';
 import type { FileMeta } from '../packages/core/src/core/types.js';
-import { commercialUcrfFlat } from '../packages/core/src/formats/commercial-ucrf-flat.js';
+import { commercialUcrfFlat, commercialUcrfFlatV310 } from '../packages/core/src/formats/commercial-ucrf-flat.js';
 
 /**
  * Real-world Commercial "Master Sheet" -> CRIF Commercial UCRF .txt + workbook report.
@@ -131,6 +131,146 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
       creationDate: new Date(Date.UTC(2000, 1, 2)),
     });
     expect(result.outputText!.split('\r\n')[0]).toBe('HD|NB12345001||26032026|15032026|01|');
+  });
+
+  /**
+   * Portal regression (15 Jul 2026): all 73 records of the 9-July submission were
+   * rejected with "RS.gender ... not as per the catalogue value". The sheet's dropdown
+   * emits the CRIF CODE ("01"/"02"), but the gender map was keyed on the LABEL
+   * ("male"/"female") alone, so every lookup missed and emitted blank — taking the
+   * courtesy prefix with it. Gender now resolves through buildLegend like every other
+   * coded column (code passthrough + number + label).
+   */
+  it('maps gender from the sheet code ("01"/"02"), not just the label', async () => {
+    const buf = readFileSync(
+      join(here, '../training-references/crif-reporting-io/NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx'),
+    );
+    // allowWarnings: this sheet also carries unrelated data defects (no Registered
+    // Office address, shifted guarantor block) that now correctly block the write.
+    // We're asserting the ENCODING here, so bypass the gate to inspect the segments.
+    const result = await convert(
+      buf,
+      commercialUcrfFlatV310,
+      { memberId: 'NB89580001', reportingDate: new Date(Date.UTC(2026, 6, 15)), creationDate: new Date(Date.UTC(2026, 6, 9)) },
+      { allowWarnings: true },
+    );
+
+    const rs = result.outputText!.split('\r\n').filter((l) => l.startsWith('RS|'));
+    expect(rs).toHaveLength(73);
+    // Not one blank gender — that blank is exactly what the portal rejected.
+    expect(rs.filter((l) => l.split('|')[9] === '')).toHaveLength(0);
+    // Real per-row values, not a constant: a male and a female row from the sheet.
+    expect(rs[0]!.split('|').slice(7, 10)).toEqual(['MR', 'Sanjay Nirmal Yadav', '01']);
+    expect(rs[3]!.split('|').slice(7, 10)).toEqual(['MS', 'Kaveri Deepak Patil', '02']);
+  });
+
+  /**
+   * Portal regression (15 Jul 2026): ~30 records rejected with "RS.stateunionTerritory
+   * ... does not contain a valid catalogue code". The V3.10 catalogue name for code 08 is
+   * the merged "Dadra and Nagar Haveli and Daman and Diu", but sheets write the short
+   * pre-merger forms with an ampersand ("Dadra & Nagar Haveli", "dadra& nagar haveli").
+   * The needle was matched literally, so every "&" spelling missed and emitted blank.
+   * State matching now folds "&"->"and" and ignores separators on both sides.
+   */
+  it('resolves state codes across "&"/"and"/spacing spelling variants', async () => {
+    const buf = readFileSync(
+      join(here, '../training-references/crif-reporting-io/NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx'),
+    );
+    const result = await convert(
+      buf,
+      commercialUcrfFlatV310,
+      { memberId: 'NB89580001', reportingDate: new Date(Date.UTC(2026, 6, 15)), creationDate: new Date(Date.UTC(2026, 6, 9)) },
+      { allowWarnings: true }, // see above — asserting encoding, not this sheet's data quality
+    );
+    const lines = result.outputText!.split('\r\n');
+
+    // Every borrower address resolves to a state code.
+    expect(lines.filter((l) => l.startsWith('AS|') && l.split('|')[8] === '')).toHaveLength(0);
+
+    // The ampersand/spacing spellings this sheet uses must all resolve. Asserting on the
+    // CODES rather than a blank-count: this reference file is edited by the client between
+    // batches, so a hardcoded count breaks on data churn instead of on a real regression.
+    const rsCodes = lines.filter((l) => l.startsWith('RS|')).map((l) => l.split('|')[30]);
+    expect(new Set(rsCodes.filter(Boolean))).toEqual(new Set(['08', '09', '11', '33']));
+    // Any row still blank must be one that genuinely names no state — never a spelling
+    // variant we failed to read. (A state name we can't parse would be the regression.)
+    const rsBlank = lines.filter((l) => l.startsWith('RS|') && l.split('|')[30] === '');
+    for (const l of rsBlank) {
+      expect(l, 'blank state on a row that DOES name a known state = parser regression')
+        .not.toMatch(/gujarat|uttar\s*pradesh|daman|nagar haveli/i);
+    }
+  });
+
+  it('folds state spelling variants to the right catalogue code', async () => {
+    const mk = async (addr: string) => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Master Sheet');
+      ws.addRow([
+        "Borrower's Name", "Borrower's PAN", 'Borrowers Legal Constitution', 'Business Category',
+        'Business/ Industry Type', "Borrower's Address with PIN Code", "Borrower's Contact No.",
+        "Borrower's Account Number", 'Facility / Loan Activation / Sanction Date',
+        'Sanctioned Amount/ Notional Amount of Contract', 'Credit Type',
+        'Current Balance / Limit Utilized', 'Asset Classification', 'Account Status',
+      ]);
+      ws.addRow(['T Ltd', 'AAAAA1111A', '30', '03', '06', addr, '9999999999', 'A1',
+        '01012024', '100000', '5000', '5000', '0001', '01']);
+      return new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer).buffer;
+    };
+    const codeFor = async (addr: string) => {
+      const r = await convert(await mk(addr), commercialUcrfFlat, META);
+      return r.outputText!.split('\r\n').find((l) => l.startsWith('AS|'))!.split('|')[8];
+    };
+
+    // Every spelling of the same UT lands on one code...
+    expect(await codeFor('X, Vapi, Dadra & Nagar Haveli-396230')).toBe('08');
+    expect(await codeFor('X, Vapi, dadra& nagar haveli-396230')).toBe('08');
+    expect(await codeFor('X, Vapi, Dadra And Nagar Haveli-396230')).toBe('08');
+    expect(await codeFor('X, Sultanpur, Uttarpradesh-228001')).toBe('33');
+    // ...and folding must not match a state inside a longer city word ("goa" in "Goalpara").
+    expect(await codeFor('Shop 1, Goalpara, Assam-781001')).toBe('04');
+  });
+
+  /**
+   * Portal regression (15 Jul 2026): rows 14/65 were rejected with "AS.pinCode 577158 ...
+   * does not contain a valid catalogue code". The address ends "Gidc Vapi, Gujarat-396195"
+   * — the PIN was correct in the sheet. The parser used /(\d{6})\b/, which against the
+   * earlier 7-digit run "Plot No-1577158" matched its LAST six digits and invented a
+   * Karnataka PIN. The PIN is now the last standalone 6-digit run, never a slice of a
+   * longer number.
+   */
+  it('reads the trailing PIN, not six digits out of a longer plot number', async () => {
+    const mk = async (addr: string) => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Master Sheet');
+      ws.addRow([
+        "Borrower's Name", "Borrower's PAN", 'Borrowers Legal Constitution', 'Business Category',
+        'Business/ Industry Type', "Borrower's Address with PIN Code", "Borrower's Contact No.",
+        "Borrower's Account Number", 'Facility / Loan Activation / Sanction Date',
+        'Sanctioned Amount/ Notional Amount of Contract', 'Credit Type',
+        'Current Balance / Limit Utilized', 'Asset Classification', 'Account Status',
+      ]);
+      ws.addRow(['T Ltd', 'AAAAA1111A', '30', '03', '06', addr, '9999999999', 'A1',
+        '01012024', '100000', '5000', '5000', '0001', '01']);
+      return new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer).buffer;
+    };
+    const pinFor = async (addr: string) => {
+      const r = await convert(await mk(addr), commercialUcrfFlat, META, { allowWarnings: true });
+      return r.outputText!.split('\r\n').find((l) => l.startsWith('AS|'))!.split('|')[9];
+    };
+
+    // The real row-14 address: a 7-digit plot number precedes the true PIN.
+    expect(await pinFor('X-Creative Textile Mill, Plot No-1577158, 2Nd Phase,Gidc Vapi, Gujarat-396195')).toBe('396195');
+    // Plain trailing PIN still works, with and without a preceding number.
+    expect(await pinFor('Shop 4, Vapi, Gujarat-396191')).toBe('396191');
+    expect(await pinFor('Plot 12345678, Vapi, Gujarat 396191')).toBe('396191');
+    // A 5-digit typo is NOT silently padded or half-matched — it stays absent.
+    expect(await pinFor('Shop 4, Vapi, Gujarat-96195')).toBe('');
+  });
+
+  it('maps gender from a label sheet too (legend accepts code OR label)', async () => {
+    const result = await convert(readFileSync(fix('input-corrected.xlsx')), commercialUcrfFlat, META);
+    const rs = result.outputText!.split('\r\n').find((l) => l.startsWith('RS|'))!;
+    expect(rs.split('|')[9]).toMatch(/^0[123]$/);
   });
 
   it('rejects a Credit Type that is absent from the lookup sheet', async () => {

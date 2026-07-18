@@ -1,14 +1,19 @@
 ---
 name: crif-commercial-format
-description: Authoritative reference for the CRIF Highmark Commercial UCRF V3.9 (delimited) bureau format — the code catalogues (Legal Constitution, Business Category/Industry, State, Location Type, Relationship, Related/Guarantor Type, Gender, Asset Classification, Account Status, Security Type/Classification, Currency) and the per-segment field orders (HD/BS/AS/RS/CR/GS/SS/CD/TS), plus how the accountant "Master Sheet" flat row maps into those segments. Load this when converting/validating commercial Master Sheets, mapping any coded column to a CRIF code, fixing the commercial-ucrf(-flat) format specs, or debugging a code/field-order mismatch against a golden. Source of truth is the client-provided spec PDF; use these tables instead of guessing or sample-deriving codes.
+description: Authoritative reference for the CRIF Highmark Commercial UCRF (delimited) bureau format, V3.10 being the source of truth — the code catalogues (Legal Constitution, Business Category/Industry, State, Location Type, Relationship, Related/Guarantor Type, Gender, Asset Classification, Account Status, Security Type/Classification, Currency) and the per-segment field orders (HD/BS/AS/RS/CR/GS/SS/CD/TS), plus how the accountant "Master Sheet" flat row maps into those segments. Load this when converting/validating commercial Master Sheets, mapping any coded column to a CRIF code, fixing the commercial-ucrf(-flat) format specs, or debugging a code/field-order mismatch against a golden. Source of truth is the client-provided V3.10 spec PDF; use these tables instead of guessing or sample-deriving codes.
 ---
 
-# CRIF Highmark Commercial UCRF V3.9 (delimited) — format reference
+# CRIF Highmark Commercial UCRF (delimited) — format reference
 
-Source: `training-references/crif-reporting-io/Commercial/Commercial UCRF - V3.9-Delimited_APR2025.pdf`
-(Section 8 catalogues + segment field lists). These codes are **fixed by CRIF** — the
-client's only job is to put the right value in each column. When a coded column disagrees
-with a golden, trust these tables, not a value reverse-engineered from one sample.
+**Source of truth: `training-references/crif-reporting-io/Commercial/Commercial UCRF - V3.10-Delimited_13th April 2026.pdf`**
+(Section 8 catalogues + segment field lists). The V3.9 PDF sits beside it for history only —
+where the two disagree, **V3.10 wins**. These codes are **fixed by CRIF** — the client's only
+job is to put the right value in each column. When a coded column disagrees with a golden,
+trust these tables, not a value reverse-engineered from one sample.
+
+> Read the PDF itself before trusting a transcription here (`pdftotext -layout` works on it).
+> This file has been wrong before: the Section-8 headings were carried over from V3.9 and sat
+> one number off for months.
 
 Engine code that must stay in sync:
 - `packages/core/src/formats/commercial-ucrf.ts` — segment wire specs (HD/BS/AS/RS/CR/GS/SS/CD/TS)
@@ -25,7 +30,12 @@ Engine code that must stay in sync:
 
 ## 1. Code catalogues (Section 8)
 
-### 8.2 Legal Constitution (BS field 12)
+> **Section numbers below are V3.10's.** V3.9 numbered this section one higher from
+> Legal Constitution onward (V3.9 8.2 Legal Constitution = V3.10 8.1, V3.9 8.5 Location
+> Type = V3.10 8.4, and so on). The **codes never moved** — only the headings. Cite V3.10
+> numbers; V3.10 is the source of truth.
+
+### 8.1 Legal Constitution (BS field 12)
 | Code | Constitution |
 |------|--------------|
 | 11 | Private Limited |
@@ -40,16 +50,16 @@ Engine code that must stay in sync:
 | 80 | Government |
 | 85 | Self Help Group |
 
-### 8.3 Business Category (BS field 13) — code = dropdown position
+### 8.2 Business Category (BS field 13) — code = dropdown position
 `01 MSME · 02 SME · 03 Micro · 04 Small · 05 Medium · 06 Large · 07 Others`
 
-### 8.4 Business / Industry Type (BS field 14) — code = dropdown position
+### 8.3 Business / Industry Type (BS field 14) — code = dropdown position
 `01 Manufacturing · 02 Distribution · 03 Wholesale · 04 Trading · 05 Broking · 06 Service Provider · 07 Importing · 08 Exporting · 09 Agriculture · 10 Dealers · 11 Others`
 
-### 8.5 Location Type (AS field 1 / office location)
+### 8.4 Location Type (AS field 2 / Borrower Office Location Type)
 `01 Registered Office (Required) · 02 Branch/Regional · 03 Warehouse · 04 Plant/Factory · 05 Others · 06 Mortgage Property`
 
-### 8.6 State (AS/RS/GS state code) — **this is the correct table**
+### 8.5 State (AS/RS/GS state code) — **this is the correct table**
 | Code | State | Code | State |
 |------|-------|------|-------|
 | 01 | Andaman & Nicobar Is. | 19 | Madhya Pradesh |
@@ -59,8 +69,8 @@ Engine code that must stay in sync:
 | 05 | Bihar | 23 | Mizoram |
 | 06 | Chandigarh | 24 | Nagaland |
 | 07 | Chhattisgarh | 25 | New Delhi |
-| 08 | Dadra & Nagar Haveli | 26 | Orissa |
-| 09 | Daman & Diu | 27 | Puducherry |
+| 08 | Dadra & Nagar Haveli **and** Daman & Diu | 26 | Orissa |
+| 09 | (Daman & Diu — legacy, still accepted) | 27 | Puducherry |
 | 10 | Goa | 28 | Punjab |
 | 11 | Gujarat | 29 | Rajasthan |
 | 12 | Haryana | 30 | Sikkim |
@@ -70,8 +80,10 @@ Engine code that must stay in sync:
 | 16 | Karnataka | 34 | Uttarakhand |
 | 17 | Kerala | 35 | West Bengal |
 | 18 | Lakshadweep | 36 | Telangana |
+| | | 37 | Ladakh (V3.10) |
+| | | 77 | Foreign address (V3.10) |
 
-### 8.7 Type of Relationship (RS field 3 / relationship)
+### 8.6 Type of Relationship (RS field 4 / relationship)
 `10 Shareholder · 11 Holding Company · 12 Subsidiary Company · 20 Proprietor · 30 Partner · 40 Trustee · 51 Promoter Director · 52 Nominee Director · 53 Independent Director · 54 Director – Since Resigned · 55 Individual Member of SHG · 56 Other Director · 60 Others · 70 Karta (HUF)`
 
 ### Related / Guarantor Type (RS field 2 / GS field 2) — the sheet's "Guarantor Type" / "Related Type" dropdown
@@ -81,7 +93,7 @@ Engine code that must stay in sync:
 ### Gender (RS/GS)
 `01 Male · 02 Female · 03 Transgender`. Courtesy prefix: Male→`Mr`, Female→`Ms`, Transgender→(blank).
 
-### 8.10 Asset Classification / Days Past Due (CR field 14) — **non-sequential**
+### 8.9 Asset Classification / Days Past Due (CR field 14) — **non-sequential**
 | Input legend (dropdown) | Code |
 |-------------------------|------|
 | 1 Standard | 0001 |
@@ -101,19 +113,19 @@ Engine code that must stay in sync:
 
 `1nnn` = nnn days past due (e.g. 214 days → 1214); `1999` = 999+ days.
 
-### 8.11 Account Status (CR field 25)
+### 8.10 Account Status (CR field 25)
 `01 Open · 02 Closed By Payment · 03 Settled & Closed · 04 Restructured · 05 Written Off · 06 Settled Post Write Off · 07 Invoked · 08 Devolved · 09 Restructured (Natural Calamity) · 10 Sold to ARC · 11 Purchase from Bank · 12 Restructured & Closed`
 
 ### Repayment Frequency (CR)
 `01 Monthly · 02 Quarterly · 03 Half-yearly · 04 Annual · 05 On Demand · 06 Bullet · 07 Rolling · 08 Others`
 
-### 8.12 Suit Filed Status (CR)
+### 8.11 Suit Filed Status (CR)
 `00 Not a Suit Filed Case · 01 Suit Filed · 02 Trial in Progress · 03 Decree Issued · 04 Execution of Decree · 05 NCLT/NCLAT Suit Filed`
 
-### 8.14 Security Type (SS field 3) — 3-digit
+### 8.13 Security Type (SS field 3) — 3-digit
 `001 Cash/Bullion/Bank Deposits · 002 Shares/Bonds/Securities · 003 Inventory · 004 Accounts Receivable · 005 Other Current Assets · 006 Plant & Machinery · 007 Land & Buildings · 008 Other Fixed Assets · 009 Other Assets · 010 Aggregate of all Current Assets · 011 Aggregate of all Fixed Assets`
 
-### 8.15 Security Classification (SS field 4) — 2-digit
+### 8.14 Security Classification (SS field 4) — 2-digit
 `01 Primary–First Charge · 02 Primary–Second Charge · 03 Primary–Third Charge · 04 Primary–Parri Passu · 21 Collateral–First Charge · 22 Collateral–Second Charge · 23 Collateral–Third Charge · 24 Collateral–Parri Passu`
 
 ### 8.8 Currency

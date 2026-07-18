@@ -42,6 +42,20 @@ export function validate(format: FormatSpec, borrowers: Borrower[]): ValidationR
       validateRow(report, spec, seg);
     }
     checkCardinality(report, format, borrower, tagCounts);
+
+    for (const message of format.checkBorrower?.(borrower.segments) ?? []) {
+      const first = borrower.segments[0];
+      report.add({
+        severity: 'error',
+        sheet: first?.sheet ?? '',
+        acNo: borrower.acNo,
+        rowNumber: first?.rowNumber ?? 0,
+        fieldKey: '',
+        rule: 'portal-mandatory',
+        message,
+        value: undefined,
+      });
+    }
   }
 
   return report;
@@ -71,7 +85,8 @@ function validateRow(report: ValidationReport, spec: SegmentSpec, row: SegmentRo
       typeof field.mandatory === 'function' ? field.mandatory(row.values) : field.mandatory;
 
     if (mandatory && !present) {
-      report.add(issue(row, field, 'mandatory', 'error', `Required field "${label(field)}" is blank`, value));
+      const severity = field.mandatorySeverity ?? 'error';
+      report.add(issue(row, field, 'mandatory', severity, `Required field "${label(field)}" is blank`, value));
       continue;
     }
     if (!present) continue;

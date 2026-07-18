@@ -40,6 +40,38 @@ const date = (key: string, label: string, mandatory = false): FieldSpec => ({
   mandatory,
 });
 
+/**
+ * Portal-mandatory: fields the CRIF ingestion portal rejects when blank, even though
+ * the layout spec lists them as optional. Anchored to a real rejection report
+ * (15 Jul 2026, file NB89580001_Commercial_09072026) where every one of these came
+ * back as a Segment/Record Reject — see training-references/portal-submission-report/.
+ * Marking them here means a bad batch fails OUR validation instead of the bureau's.
+ *
+ * Severity is calibrated against ACCEPTED client goldens, not the rejection report
+ * alone: a field the portal took blank in a previously-accepted file is a 'warning'
+ * (surface it, don't halt a legitimate submission); one that is populated in every
+ * accepted golden is an 'error'. `CIC Commercial Data Master Sheet_output.txt` was
+ * accepted with blank SS.valueOfSecurity and blank RS state — hence those two warn.
+ */
+const portalReq = (key: string, label: string, extra: Partial<FieldSpec> = {}): FieldSpec => ({
+  key,
+  label,
+  type: 'string',
+  mandatory: true,
+  ...extra,
+});
+
+/** Portal-mandatory in principle, but observed blank in an ACCEPTED file — warn only. */
+const portalWarn = (key: string, label: string, extra: Partial<FieldSpec> = {}): FieldSpec =>
+  portalReq(key, label, { mandatorySeverity: 'warning', ...extra });
+
+/** Related/Guarantor Type 2 = Resident Indian Individual, 4 = Foreign/NR Individual.
+ * Gender is only meaningful — and only demanded by the portal — for those. */
+const isIndividual = (v: unknown): boolean => {
+  const s = String(v ?? '').trim();
+  return s === '2' || s === '02' || s === '4' || s === '04';
+};
+
 const HD: SegmentSpec = {
   tag: 'HD',
   encoding: 'pipe-delimited',
@@ -131,13 +163,13 @@ const RS: SegmentSpec = {
     tag('RS'),
     opt('relationshipDuns', 'Relationship DUNS Number'),
     opt('relatedType', 'Related Type'),
-    opt('relationship', 'Relationship'),
+    portalReq('relationship', 'Relationship'),
     opt('businessEntityName', 'Business Entity Name'),
     opt('rsBusinessCategory', 'Business Category'),
     opt('rsBusinessIndustryType', 'Business / Industry Type'),
     opt('namePrefix', 'Individual Name Prefix'),
     opt('fullName', 'Full Name'),
-    opt('gender', 'Gender'),
+    portalReq('gender', 'Gender', { mandatory: (v) => isIndividual(v.relatedType) }),
     opt('rsCompanyRegNumber', 'Company Registration Number'),
     date('rsDateOfIncorporation', 'Date of Incorporation'),
     date('dateOfBirth', 'Date of Birth'),
@@ -158,7 +190,7 @@ const RS: SegmentSpec = {
     opt('rsAddressLine3', 'Address Line 3'),
     opt('rsCity', 'City/Town'),
     opt('rsDistrict', 'District'),
-    opt('rsStateCode', 'State/Union Territory'),
+    portalWarn('rsStateCode', 'State/Union Territory'),
     opt('rsPinCode', 'Pin Code'),
     opt('rsCountry', 'Country'),
     opt('rsMobile', 'Mobile Number(s)'),
@@ -191,7 +223,7 @@ const CR: SegmentSpec = {
     opt('notionalOutstanding', 'Notional Amount of Out-standing Restructured Contracts', { type: 'numeric' }),
     date('loanExpiryDate', 'Loan Expiry / Maturity Date'),
     date('loanRenewalDate', 'Loan Renewal Date'),
-    opt('assetClassification', 'Asset Classification/Number of days past due NDPD'),
+    portalReq('assetClassification', 'Asset Classification/Number of days past due NDPD'),
     date('assetClassificationDate', 'Asset Classification Date'),
     opt('amountOverdue', 'Amount Overdue / Limit Overdue', { type: 'numeric' }),
     opt('overdueBucket01', 'Overdue Bucket 01 ( 1 - 30 days)', { type: 'numeric' }),
@@ -242,7 +274,7 @@ const GS: SegmentSpec = {
     opt('gsReserved5', 'Reserved'), // 5
     opt('gsNamePrefix', 'Individual Name Prefix'), // 6
     opt('gsFullName', 'Full Name'), // 7 (individual full name OR corporate entity name)
-    opt('gsGender', 'Gender'), // 8
+    portalWarn('gsGender', 'Gender', { mandatory: (v) => isIndividual(v.gsRelatedType) }), // 8
     opt('gsCompanyRegNumber', 'Company Registration Number'), // 9
     date('gsDateOfIncorporation', 'Date of Incorporation'), // 10
     date('gsDateOfBirth', 'Date of Birth'), // 11 (also carries corporate DOI in the sample)
@@ -257,13 +289,13 @@ const GS: SegmentSpec = {
     opt('gsTin', 'TIN'), // 20
     opt('gsServiceTax', 'Service Tax #'), // 21
     opt('gsOtherId', 'Other ID'), // 22
-    opt('gsAddressLine1', 'Address Line 1'), // 23
+    portalWarn('gsAddressLine1', 'Address Line 1'), // 23
     opt('gsAddressLine2', 'Address Line 2'), // 24
     opt('gsAddressLine3', 'Address Line 3'), // 25
     opt('gsCity', 'City/Town'), // 26
     opt('gsDistrict', 'District'), // 27
-    opt('gsStateCode', 'State/Union Territory'), // 28
-    opt('gsPinCode', 'Pin Code'), // 29
+    portalWarn('gsStateCode', 'State/Union Territory'), // 28
+    portalWarn('gsPinCode', 'Pin Code'), // 29
     opt('gsCountry', 'Country'), // 30
     opt('gsMobile', 'Mobile Number(s)'), // 31
     opt('gsTelNumber', 'Telephone Number(s)'), // 32
@@ -282,10 +314,10 @@ const SS: SegmentSpec = {
   cardinality: 'many',
   fields: [
     tag('SS'),
-    opt('securityValue', 'Value of Security', { type: 'numeric' }),
+    portalWarn('securityValue', 'Value of Security', { type: 'numeric' }),
     opt('ssCurrency', 'Currency', { type: 'enum', enum: CURRENCY, default: 'INR' }),
     opt('securityType', 'Type of Security'),
-    opt('securityClassification', 'Security Classification'),
+    portalWarn('securityClassification', 'Security Classification'),
     opt('securityDate', 'Date of Valuation'),
     opt('ssFiller', 'Filler'),
     opt('ssFiller2', 'Filler'), // pad to golden 8-token width
@@ -322,6 +354,62 @@ const TS: SegmentSpec = {
   ],
 };
 
+/**
+ * Portal-mandatory cross-segment rule: the bureau requires a Registered Office (Location
+ * Type 01) address for every borrower and rejects the whole record without one ("The
+ * borrower was rejected as there is not a single valid address found"). Reported rather
+ * than auto-corrected: relabelling a warehouse/plant address as the registered office
+ * would assert a legal fact the sheet doesn't support — a human has to supply the real one.
+ */
+const checkRegisteredOffice = (
+  segments: ReadonlyArray<{ tag: string; values: Record<string, unknown> }>,
+): string[] => {
+  const addresses = segments.filter((s) => s.tag === 'AS');
+  if (addresses.length === 0) return [];
+  const hasRegistered = addresses.some((a) => String(a.values.officeLocationType ?? '').trim() === '01');
+  if (hasRegistered) return [];
+  const seen = addresses.map((a) => String(a.values.officeLocationType ?? '').trim() || 'blank').join(', ');
+  return [
+    'No Registered Office address: the portal requires at least one address with ' +
+      `Location Type 01 for each borrower, but found only [${seen}]. ` +
+      'The bureau rejects the entire borrower record without one.',
+  ];
+};
+
+/**
+ * V3.10 §7.5 field 36: "Date Classified as Wilful Default" is Required-Conditionally —
+ * it must be reported when field 35 Wilful Default Status is "1 = Wilful Defaulter".
+ *
+ * The accountant Master Sheet merges both CRIF fields into ONE column ("Wilful Default
+ * Status / YesNo / Date Classified as Wilful Default If yes") that in practice only ever
+ * carries 0 or 1, so the date has nowhere to live and reaches us blank. Neither repair is
+ * ours to make: inventing a classification date, or downgrading the status to 0, each
+ * misstates a borrower's wilful-default standing to the bureau — a legal assertion about a
+ * real business. So we block and name the missing column instead.
+ */
+const checkWilfulDefaultDate = (
+  segments: ReadonlyArray<{ tag: string; values: Record<string, unknown> }>,
+): string[] => {
+  const messages: string[] = [];
+  for (const cr of segments.filter((s) => s.tag === 'CR')) {
+    const status = String(cr.values.wilfulDefaultStatus ?? '').trim();
+    const date = String(cr.values.wilfulDefaultDate ?? '').trim();
+    // A literal "0" is the V3.9 placeholder for "no date", not a real date.
+    if (status !== '1' || (date !== '' && date !== '0')) continue;
+    messages.push(
+      'Wilful Default Status is "1 = Wilful Defaulter" but "Date Classified as Wilful ' +
+        'Default" is blank. The bureau requires the date whenever the status is 1 and ' +
+        'rejects the credit facility without it. Add the classification date to the sheet ' +
+        '(DD/MM/YYYY), or set the status to 0 if this account is not in wilful default.',
+    );
+  }
+  return messages;
+};
+
+export const checkCommercialBorrower = (
+  segments: ReadonlyArray<{ tag: string; values: Record<string, unknown> }>,
+): string[] => [...checkRegisteredOffice(segments), ...checkWilfulDefaultDate(segments)];
+
 export const commercialUcrf: FormatSpec = {
   id: 'commercial-ucrf',
   label: 'Commercial UCRF (Template)',
@@ -333,6 +421,7 @@ export const commercialUcrf: FormatSpec = {
   header: HD,
   body: [BS, AS, RS, CR, GS, SS, CD],
   trailer: TS,
+  checkBorrower: checkCommercialBorrower,
   buildHeaderRow: (meta): TypedRow => ({
     _tag: 'HD',
     memberId: meta.memberId,

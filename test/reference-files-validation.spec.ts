@@ -33,7 +33,14 @@ const ref = (f: string) => join(REF, f);
 type Check =
   | { kind: 'golden'; input: string; output: string; format: FormatId; meta: FileMeta }
   | { kind: 'smoke'; input: string; format: FormatId; meta: FileMeta }
-  | { kind: 'reject'; input: string; format: FormatId; meta: FileMeta; why: string };
+  | { kind: 'reject'; input: string; format: FormatId; meta: FileMeta; why: string }
+  /**
+   * 4. known-defects — a REAL customer file that carries data defects the bureau
+   *    portal rejects. It must fail our validation for exactly the listed field keys
+   *    (a superset is drift worth reviewing; a subset means a rule silently stopped
+   *    firing). Distinct from `reject`, which covers deliberately-malformed inputs.
+   */
+  | { kind: 'known-defects'; input: string; format: FormatId; meta: FileMeta; fields: string[]; why: string };
 
 const META_DEFAULT: FileMeta = {
   memberId: 'NB1234567',
@@ -61,18 +68,44 @@ const CHECKS: Check[] = [
   { kind: 'smoke', input: 'consumer_input_failing.xlsx', format: 'consumer-ucrf12-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'consumer-input-2.xlsx', format: 'consumer-ucrf12-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'client-input-commercial-2.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
-  { kind: 'smoke', input: 'Captree_commercial_input.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  {
+    kind: 'known-defects',
+    input: 'Captree_commercial_input.xlsx',
+    format: 'commercial-ucrf-flat',
+    meta: META_DEFAULT,
+    fields: ['relationship'],
+    why: 'Relationship Type column is blank for every row; the paired accepted output has it populated on all 19 RS lines, so the sheet is missing data the portal demands.',
+  },
   // 1 Jul batch: exercises guarantor (GS) + security (SS) blocks and both guarantor
   // layouts. Smoke-only — the paired .txt outputs are hand-finalized (inconsistent
   // relationship codes / address casing / stray whitespace) so they are NOT byte-
   // reproducible; see the crif-commercial-format skill and COMMERCIAL_FLAT_PIPELINE.md.
   { kind: 'smoke', input: 'commercial_input_1Jul.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
-  { kind: 'smoke', input: 'commercial_input_1Jul_OD_Loan.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  {
+    kind: 'known-defects',
+    input: 'commercial_input_1Jul_OD_Loan.xlsx',
+    format: 'commercial-ucrf-flat',
+    meta: META_DEFAULT,
+    fields: ['assetClassification', 'relationship'],
+    why: 'Hand-finalized OD sheet (see the crif-commercial-format skill): identical rows carry different codes and several rows omit Asset Classification / Relationship entirely.',
+  },
   // 31 March + 30 June: very messy real sheets ("-" placeholders, "PVT LTD", natural
   // dates like "04th June 2025", jumbled guarantor cells). Smoke-only — the paired
   // outputs are hand-curated; the value here is that they now convert with ZERO errors.
   { kind: 'smoke', input: 'commercial_input_31March.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'commercial_input_30June.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
+  // 9 Jul NEW_CIC sheet: two borrowers write comma-less addresses with no state name
+  // ("…Near Modern English School Vapi 396191") — guards the splitAddress fallback
+  // that used to leave Address Line 1 blank (2 validation errors, file not generated).
+  {
+    kind: 'known-defects',
+    input: 'NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx',
+    format: 'commercial-ucrf-flat-v310',
+    meta: META_DEFAULT,
+    // '' = the borrower-level Registered Office rule (no single field to blame).
+    fields: ['', 'assetClassification', 'relationship'],
+    why: 'The 9-July batch the portal rejected 73/73 (see training-references/portal-submission-report/). 55 borrowers have no Location Type 01 address; the guarantor block is shifted a column in the source sheet. Must never validate clean again.',
+  },
 ];
 
 const err = (r: any) => (r.report?.issues ?? []).filter((i: any) => i.severity === 'error');
@@ -100,6 +133,16 @@ describe('reference-files pre-rollout validation', () => {
         const errors = err(result);
         expect(errors, `validation errors: ${errors.map((e: any) => e.message).join('; ')}`).toEqual([]);
         expect(String(result.outputText ?? '').length).toBeGreaterThan(0);
+      });
+    } else if (c.kind === 'known-defects') {
+      it(`known defects blocked: ${c.input}`, async () => {
+        const result: any = await convert(readFileSync(ref(c.input)), getFormat(c.format), c.meta);
+        const errors = err(result);
+        // The whole point: this file must NOT sail through as it did on 9 July.
+        expect(errors.length, `expected ${c.why}`).toBeGreaterThan(0);
+        expect(result.output, 'a file with portal-fatal defects must not be written').toBeUndefined();
+        // Pin the exact rules; drift in either direction is worth a human look.
+        expect([...new Set(errors.map((e: any) => e.fieldKey))].sort()).toEqual([...c.fields].sort());
       });
     }
   }
@@ -149,6 +192,29 @@ describe('reference-files pre-rollout validation', () => {
     // One GS, unpadded relType (2), upper-case prefix (MS). Name reflects the input cell.
     expect(out[5]).toBe('GS|999999999|2||||MS|Manjula|02|||20061987|BAEPB5560K|||||||||||[#7, Old No. 15/1, 80 ft Road, 2nd Phase, Girinagar|||Bengaluru|Bengaluru|16|560085|079|||||||');
     expect(out[6]).toBe('TS|1|1|');
+  });
+
+  /**
+   * Regression for the 15-July portal rejection (73/73 borrowers), replayed against the
+   * exact sheet that produced it. See training-references/portal-submission-report/.
+   *
+   * Both blocking rules are pinned to the counts the source data predicts, so a future
+   * change that silently stops emitting either one fails here rather than at the bureau:
+   *   - 55 borrowers carry only Location Type 03/04 (no Registered Office) -> portal's
+   *     "not a single valid address found" record-reject.
+   *   - 18 rows report Wilful Default Status 1 with no classification date (the Master
+   *     Sheet merges both CRIF fields into one 0/1 column) -> V3.10 §7.5 field 36.
+   * The portal reported 54 address rejects to our 55: it stops at the first fatal reject
+   * per borrower, so its counts are a floor, not an exact match.
+   */
+  it('blocks the 15-July rejection batch: no Registered Office (55) + wilful-default date (18)', async () => {
+    const buf = readFileSync(ref('NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx'));
+    const result: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), META_DEFAULT);
+    // Blocking: no output may be generated for a batch the bureau would reject.
+    expect(result.output).toBeUndefined();
+    const errors = err(result);
+    expect(errors.filter((e: any) => e.message.includes('Registered Office'))).toHaveLength(55);
+    expect(errors.filter((e: any) => e.message.includes('Wilful Default Status'))).toHaveLength(18);
   });
 
   // Regression: an expanded template whose header row is NOT the canonical top block, so

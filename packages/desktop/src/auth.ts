@@ -3,16 +3,20 @@
  *
  * Users log in with a provisioned username + password; the backend returns
  * server-signed JWTs (access + refresh). We store them locally and send the
- * access token as `Authorization: Bearer` on the heartbeat. Because the tokens
+ * access token as `Authorization: Bearer` on the session check. Because the tokens
  * are signed by a server-only secret, a tampered client cannot forge a valid
  * session — identity/subscription is tamper-proof. SINGLE-SESSION is enforced
  * server-side: logging in elsewhere revokes this session, which we discover on
- * the next heartbeat (→ forced back to the login screen).
+ * the next check (→ toast + forced back to the login screen).
+ *
+ * `checkSession()` runs on the CTAs that matter (Generate / Validate / Retry), NOT on a
+ * timer. A background poll bought nothing — an idle window can't leak data — while costing
+ * a request per user per tick. Verifying at the moment of use is both cheaper and STRICTER:
+ * a revoked or downlevel client is stopped before it can produce a submission file.
  *
  * This module just reports status; the FAIL-CLOSED policy lives in main.ts
- * (evaluateGate). `heartbeat()` returns `'unreachable'` on any network error,
- * which the gate treats as a hard block — the app requires a live connection and
- * a foreground window to run.
+ * (evaluateGate). `checkSession()` returns `'unreachable'` on any network error,
+ * which the gate treats as a hard block — the app requires a live connection to generate.
  */
 import { getIdentity } from './identity';
 
@@ -29,7 +33,7 @@ export interface LoginResult {
   downloadUrl?: string;
 }
 
-export interface HeartbeatResult {
+export interface SessionCheckResult {
   status: 'ok' | 'upgrade-required' | 'session-revoked' | 'unauthenticated' | 'unreachable';
   latestVersion?: string;
   downloadUrl?: string;
@@ -72,7 +76,12 @@ export async function login(username: string, password: string, version: string)
   }
 }
 
-export async function heartbeat(version: string): Promise<HeartbeatResult> {
+/**
+ * Ask the server whether THIS device still holds the user's session (and is on a supported
+ * version). Called from the CTAs — never on a timer. On a 401 we try a single token refresh
+ * before concluding the session is gone, so an expired access token doesn't read as a revoke.
+ */
+export async function checkSession(version: string): Promise<SessionCheckResult> {
   if (!SERVER) return { status: 'ok' };
   const at = read(K_AT);
   if (!at) return { status: 'unauthenticated' };
@@ -106,18 +115,31 @@ export async function heartbeat(version: string): Promise<HeartbeatResult> {
   }
 }
 
+/**
+ * Sign out. Asks the server to delete the session — which frees the user's single seat, so
+ * the account immediately stops counting as in use and they can sign in on any device.
+ * We send BOTH credentials: the access token (always current) and the refresh token (which
+ * rotates, so our copy may be stale). The server revokes if either one matches.
+ *
+ * Local tokens are cleared regardless of the outcome — a device that can't reach the server
+ * must still be able to sign itself out. In that case the server-side session lingers until
+ * its TTL, but the next successful login evicts it anyway (single-session).
+ */
 export async function logout(): Promise<void> {
+  const at = read(K_AT);
   const rt = read(K_RT);
   try {
-    if (rt && SERVER) {
+    if (SERVER && (at || rt)) {
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (at) headers.authorization = `Bearer ${at}`;
       await fetch(urlOf('/api/crif/auth/logout'), {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ refreshToken: rt }),
+        headers,
+        body: JSON.stringify({ refreshToken: rt ?? '' }),
       });
     }
   } catch {
-    /* best effort */
+    /* best effort — we still clear locally below */
   }
   clear();
 }
