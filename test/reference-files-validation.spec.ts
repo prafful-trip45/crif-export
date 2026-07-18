@@ -94,20 +94,18 @@ const CHECKS: Check[] = [
   // outputs are hand-curated; the value here is that they now convert with ZERO errors.
   { kind: 'smoke', input: 'commercial_input_31March.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'commercial_input_30June.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
-  // NEW_CIC "- Copy" sheet: the cleaned resubmission of the 9-July batch. The accountant
-  // fixed the 55 no-registered-office and 17 of the 18 wilful-default rows after the
-  // 15-July rejection; ONE borrower (row 9) still reports Wilful Default Status 1 with no
-  // classification date. This must still block — a partially-cleaned file that sails
-  // through would resubmit the same fatal defect the 17-July report caught.
-  {
-    kind: 'known-defects',
-    input: 'NEW_CIC Commercial Master Sheet_09.07.2026 - Copy.xlsx',
-    format: 'commercial-ucrf-flat-v310',
-    meta: META_DEFAULT,
-    // '' = borrower-level cross-segment rule (wilful-default date; no single field to blame).
-    fields: [''],
-    why: 'Row 9 reports Wilful Default Status 1 with no classification date (V3.10 §7.5 field 36). See training-references/portal-submission-report/ (17-July run). Must never validate clean until the date is supplied or the status corrected.',
-  },
+  // NEW_CIC "- Copy" sheet: the fully cleaned resubmission of the 9-July batch. After the
+  // 15-July rejection the accountant fixed the 55 no-registered-office rows, all 18
+  // wilful-default rows (adding the separate "Date Classified as Wilful Default" column),
+  // and the address issues the 17-July run flagged. It now converts with ZERO errors — the
+  // value here is that our gender-code, PIN, state-fold and wilful-date reads all hold on
+  // the real file. Detailed field-level assertions live in the dedicated test below.
+  { kind: 'smoke', input: 'NEW_CIC Commercial Master Sheet_09.07.2026 - Copy.xlsx', format: 'commercial-ucrf-flat-v310', meta: META_DEFAULT },
+  // "Copy - 1": same layout as "- Copy", reported by the shipped v0.2.4 app with 146 errors
+  // (every CR row blank sanctionDate + sanctionedAmount — 2×73). Those columns (12/13) are
+  // populated in the sheet; the shipped build mis-read them, and the current reader resolves
+  // them cleanly. Smoke-guards that this exact file converts with zero errors.
+  { kind: 'smoke', input: 'NEW_CIC Commercial Master Sheet_09.07.2026 - Copy - 1.xlsx', format: 'commercial-ucrf-flat-v310', meta: META_DEFAULT },
 ];
 
 const err = (r: any) => (r.report?.issues ?? []).filter((i: any) => i.severity === 'error');
@@ -197,28 +195,33 @@ describe('reference-files pre-rollout validation', () => {
   });
 
   /**
-   * The cleaned resubmission of the 9-July batch (see training-references/portal-submission-report/).
-   * After the 15-July rejection the accountant fixed the 55 no-registered-office and 17 of
-   * 18 wilful-default rows; the 17-July run then rejected only 2 borrowers on address issues
-   * that our parser fixes now cover (7-digit-plot PIN slice, "&"/spacing state variants).
+   * The fully cleaned resubmission of the 9-July batch (training-references/portal-submission-report/).
+   * The 15-July run rejected 73/73; the accountant then fixed the registered-office and
+   * wilful-default data (adding a separate "Date Classified as Wilful Default" column) and
+   * the 17-July run rejected only 2 borrowers on address issues our parser fixes now cover.
+   * With all of that plus these converter fixes, the file converts with ZERO errors.
    *
-   * This pins the two converter fixes against the real file, so a regression fails here
-   * rather than at the bureau:
-   *   - gender: the sheet carries the CRIF CODE ("01"/"02"), not a label; every RS/GS row
-   *     must resolve (a label-only map blanked all 73 and got them all rejected).
-   *   - state + PIN: every AS/RS address must resolve a state code and a whole 6-digit PIN.
-   * One borrower (row 9) still reports Wilful Default Status 1 with no date -> still blocks.
+   * This pins every fix against the real file, so a regression fails here not at the bureau:
+   *   - gender: the sheet carries the CRIF CODE ("01"/"02"), not a label; a label-only map
+   *     blanked all 73 RS/GS rows and got them all rejected.
+   *   - state + PIN: every AS/RS address resolves a state code and a whole 6-digit PIN.
+   *   - wilful-default date: the emission reads the sheet's date column. This regressed once
+   *     (the passthrough was reverted to a hardcoded blank while the header binding stayed),
+   *     so assert the actual date lands on the status-1 row — not just that the file is clean.
    */
-  it('converts the cleaned 9-July resubmission: gender/state/PIN resolved, one wilful row still blocks', async () => {
+  it('converts the cleaned 9-July resubmission with zero errors (gender/state/PIN/wilful-date)', async () => {
     const buf = readFileSync(ref('NEW_CIC Commercial Master Sheet_09.07.2026 - Copy.xlsx'));
-    const result: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), META_DEFAULT, { allowWarnings: true });
+    const result: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), META_DEFAULT);
+    // The whole batch now generates — no blocking defects remain.
+    expect(err(result)).toEqual([]);
+    expect(result.output).toBeDefined();
+
     const lines: string[] = (result.outputText ?? '').split('\r\n');
     const rs = lines.filter((l) => l.startsWith('RS|'));
     expect(rs).toHaveLength(73);
     // No blank gender (col 9) on any related-person row — the gender-code regression.
     expect(rs.filter((l) => l.split('|')[9] === '')).toHaveLength(0);
     // A blank RS state (col 30) is allowed only when the address names no known state.
-    // A row that DOES name one but comes through blank would be the parser regression.
     for (const l of rs.filter((r) => r.split('|')[30] === '')) {
       expect(l, 'blank RS state on a row naming a known state = parser regression')
         .not.toMatch(/gujarat|uttar\s*pradesh|daman|nagar haveli|maharashtra/i);
@@ -226,10 +229,12 @@ describe('reference-files pre-rollout validation', () => {
     // No AS row loses its state code, and no PIN is a sliced fragment of a longer number.
     expect(lines.filter((l) => l.startsWith('AS|') && l.split('|')[8] === '')).toHaveLength(0);
 
-    // With the gate on, the one remaining wilful-default-date defect still blocks the write.
-    const gated: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), META_DEFAULT);
-    expect(gated.output).toBeUndefined();
-    expect(err(gated).filter((e: any) => e.message.includes('Wilful Default Status'))).toHaveLength(1);
+    // Every status-1 wilful row must carry the sheet's real classification date (CR token
+    // 34 = status, 35 = "Date Classified as Wilful Default"). A blank date on a status-1 row
+    // is the reverted-passthrough regression that silently reappeared once already.
+    const status1 = lines.filter((l) => l.startsWith('CR|') && l.split('|')[34] === '1');
+    expect(status1.length).toBeGreaterThan(0);
+    expect(status1.every((l) => /^\d{8}$/.test(l.split('|')[35] ?? ''))).toBe(true);
   });
 
   // Regression: an expanded template whose header row is NOT the canonical top block, so
