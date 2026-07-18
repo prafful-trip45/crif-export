@@ -13,4 +13,5 @@ export {
   type ByteDiff,
 } from './output/comparator.js';
 export { writeReport } from './output/report-writer.js';
+export { writeIssuesWorkbook } from './output/issues-writer.js';
 export { FORMATS, getFormat, listFormats } from './formats/index.js';

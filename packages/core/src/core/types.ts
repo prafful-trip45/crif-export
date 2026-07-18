@@ -199,6 +199,14 @@ export interface FormatSpec {
     /** Map one keyed source row to the borrower's segment records. */
     explode: (input: Record<string, FieldValue>, ctx: FlatExplodeContext) => SegmentSeed[];
     /**
+     * Wire field key -> the source INPUT key it derives from, for error attribution.
+     * Most wire fields share their input key's name, so only DERIVED fields need an
+     * entry: e.g. `rsStateCode`/`rsPinCode`/`rsCity` are all parsed out of the
+     * `relatedAddress` column, so a blank state points the user at the address cell.
+     * The reader uses this + the resolved column map to stamp `SegmentRow.sourceColumns`.
+     */
+    wireFieldSource?: Record<string, string>;
+    /**
      * File-level header values the accountant fills in the sheet's top rows, by
      * cell address -> FileMeta key (e.g. { B5: 'memberId', B6: 'reportingDate',
      * B7: 'creationDate' }). When a cell is non-blank it OVERRIDES the CLI flag;

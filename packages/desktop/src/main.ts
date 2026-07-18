@@ -15,6 +15,7 @@ import {
   runValidate,
   listFormats,
   getFormat,
+  exportIssues,
   type FormatId,
   type ConvertResult,
   type CompareResult,
@@ -734,11 +735,11 @@ function render(r: ConvertResult) {
     html += ` &nbsp; ${r.counts.borrowerCount} borrowers · ${r.counts.accountCount} accounts`;
 
   if (r.report.issues.length) {
-    html += '<table><tr><th>Severity</th><th>Sheet</th><th>Row</th><th>Field</th><th>Message</th></tr>';
+    html += '<table><tr><th>#</th><th>Severity</th><th>Sheet</th><th>Row</th><th>Column</th><th>Field</th><th>Message</th></tr>';
     html += r.report.issues
       .map(
-        (i) =>
-          `<tr><td class="sev-${i.severity}">${i.severity}</td><td>${escapeHtml(i.sheet)}</td><td>${i.rowNumber}</td><td>${escapeHtml(i.fieldKey)}</td><td>${escapeHtml(i.message)}</td></tr>`,
+        (i, n) =>
+          `<tr><td>${n + 1}</td><td class="sev-${i.severity}">${i.severity}</td><td>${escapeHtml(i.sheet)}</td><td>${i.rowNumber}</td><td>${escapeHtml(i.column ?? '')}</td><td>${escapeHtml(i.fieldKey)}</td><td>${escapeHtml(i.message)}</td></tr>`,
       )
       .join('');
     html += '</table>';
@@ -756,6 +757,16 @@ function render(r: ConvertResult) {
   if (r.reportWorkbook) {
     addSaveButton(actions, 'Save workbook report (.xlsx)', 'report.xlsx', r.reportWorkbook, true);
   }
+  // Indexed errors/warnings export — offered whenever there is anything to review.
+  if (r.report.issues.length) {
+    addAsyncSaveButton(actions, 'Export errors (.xlsx)', issuesFileName(), () => exportIssues(r.report), true);
+  }
+}
+
+/** `<member>_<input>_issues_<HHMMSS>.xlsx` — a stable, obvious name for the errors export. */
+function issuesFileName(): string {
+  const base = (val('memberId') || 'submission').replace(/[^\w.-]+/g, '_');
+  return `${base}_issues.xlsx`;
 }
 
 // ---- render the Validator result -------------------------------------------
@@ -836,6 +847,32 @@ function addSaveButton(
   btn.className = 'dl' + (alt ? ' alt' : '');
   btn.textContent = label;
   btn.onclick = () => saveFile(defaultName, data);
+  parent.appendChild(btn);
+}
+
+/**
+ * Like addSaveButton, but the bytes are produced on click by an async `build` (e.g. the
+ * errors workbook is only assembled when the user asks for it). Disables the button while
+ * building so a double-click can't launch two save dialogs.
+ */
+function addAsyncSaveButton(
+  parent: HTMLElement,
+  label: string,
+  defaultName: string,
+  build: () => Promise<Uint8Array>,
+  alt: boolean,
+) {
+  const btn = document.createElement('button');
+  btn.className = 'dl' + (alt ? ' alt' : '');
+  btn.textContent = label;
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      await saveFile(defaultName, await build());
+    } finally {
+      btn.disabled = false;
+    }
+  };
   parent.appendChild(btn);
 }
 

@@ -19,6 +19,13 @@ export interface ValidationIssue {
   acNo: string;
   /** 1-based Excel row number for the offending record. */
   rowNumber: number;
+  /**
+   * Source spreadsheet column letter the offending value was read from (e.g. "AF").
+   * For a DERIVED field (state/PIN/city parsed out of a free-text address) this points
+   * at the column the user actually edits — the address column — not a column that does
+   * not exist in the sheet. Undefined when the field maps to no single source column.
+   */
+  column?: string;
   fieldKey: string;
   /** Human label of the field, for the report. */
   fieldLabel?: string;

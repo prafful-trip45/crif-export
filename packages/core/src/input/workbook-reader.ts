@@ -195,6 +195,17 @@ export async function readFlatExplodeWorkbook(
     }
   }
 
+  // Wire field key -> source column letter, for pointing a blank/invalid field back at
+  // the cell the user edits. The column layout is fixed for the sheet, so compute once.
+  // Start from the resolved input-key -> column, then alias each DERIVED wire field
+  // (e.g. rsStateCode) onto the column of the input it parses from (relatedAddress).
+  const sourceColumns: Record<string, string> = {};
+  for (const [col, key] of colToKey) sourceColumns[key] = numberToColLetter(col);
+  for (const [wireKey, inputKey] of Object.entries(format.flatExplode!.wireFieldSource ?? {})) {
+    const col = sourceColumns[inputKey];
+    if (col) sourceColumns[wireKey] = col;
+  }
+
   const rows: SegmentRow[] = [];
   for (let r = effFirstDataRow; r <= ws.rowCount; r++) {
     const wsRow = ws.getRow(r);
@@ -224,6 +235,7 @@ export async function readFlatExplodeWorkbook(
         rowNumber: r,
         values: seed.values,
         readerIssues: seed.issues,
+        sourceColumns,
       });
     }
   }
@@ -374,6 +386,17 @@ function colLetterToNumber(letters: string): number {
   let n = 0;
   for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
   return n;
+}
+
+/** 1 -> "A", 26 -> "Z", 27 -> "AA", ... (inverse of colLetterToNumber). */
+function numberToColLetter(n: number): string {
+  let s = '';
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = (n - m - 1) / 26;
+  }
+  return s;
 }
 
 function findSheet(wb: ExcelJS.Workbook, name: string): ExcelJS.Worksheet | undefined {

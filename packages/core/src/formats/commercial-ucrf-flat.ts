@@ -684,6 +684,17 @@ const COLUMN_HEADERS: Record<string, string> = {
   'Location Type': 'locationType',
 };
 
+/**
+ * Wire field key -> source INPUT key, so the validator can point a blank/invalid DERIVED
+ * field back at the column the user actually edits. State / PIN / City / Line-1 are all
+ * parsed out of the single free-text address column, so a blank State/Union Territory
+ * points at the address cell — the sheet has no "State" column of its own.
+ */
+const WIRE_FIELD_SOURCE: Record<string, string> = {
+  addressLine1: 'address', cityTown: 'address', stateCode: 'address', pinCode: 'address',
+  rsAddressLine1: 'relatedAddress', rsCity: 'relatedAddress', rsStateCode: 'relatedAddress', rsPinCode: 'relatedAddress',
+};
+
 function explode(
   input: Record<string, FieldValue>,
   ctx: FlatExplodeContext,
@@ -979,6 +990,7 @@ export const commercialUcrfFlat: FormatSpec = {
     columns: COLUMNS,
     columnHeaders: COLUMN_HEADERS,
     explode,
+    wireFieldSource: WIRE_FIELD_SOURCE,
     // Accountant fills these top-of-sheet cells; a non-blank value overrides the
     // matching CLI flag. A5/A6/A7 hold the labels; B5/B6/B7 the values.
     headerCells: { B5: 'memberId', B6: 'reportingDate', B7: 'creationDate' },

@@ -10,12 +10,19 @@
 import { convert as coreConvert } from '../../core/src/core/pipeline.js';
 import { getFormat, listFormats } from '../../core/src/formats/index.js';
 import { compareOutputs } from '../../core/src/output/comparator.js';
+import { writeIssuesWorkbook } from '../../core/src/output/issues-writer.js';
 import type { FileMeta, FormatId } from '../../core/src/core/types.js';
-import type { ConvertResult } from '../../core/src/core/result.js';
+import type { ConvertResult, ValidationReport } from '../../core/src/core/result.js';
 import type { CompareResult } from '../../core/src/output/comparator.js';
 
 export { listFormats, getFormat };
 export type { FormatId, ConvertResult, CompareResult };
+
+/** Build the indexed .xlsx errors/warnings report for a validation result. */
+export async function exportIssues(report: ValidationReport): Promise<Uint8Array> {
+  const buf = await writeIssuesWorkbook(report);
+  return new Uint8Array(buf);
+}
 
 export interface ConvertInput {
   formatId: FormatId;
