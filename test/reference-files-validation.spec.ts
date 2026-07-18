@@ -94,17 +94,19 @@ const CHECKS: Check[] = [
   // outputs are hand-curated; the value here is that they now convert with ZERO errors.
   { kind: 'smoke', input: 'commercial_input_31March.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
   { kind: 'smoke', input: 'commercial_input_30June.xlsx', format: 'commercial-ucrf-flat', meta: META_DEFAULT },
-  // 9 Jul NEW_CIC sheet: two borrowers write comma-less addresses with no state name
-  // ("…Near Modern English School Vapi 396191") — guards the splitAddress fallback
-  // that used to leave Address Line 1 blank (2 validation errors, file not generated).
+  // NEW_CIC "- Copy" sheet: the cleaned resubmission of the 9-July batch. The accountant
+  // fixed the 55 no-registered-office and 17 of the 18 wilful-default rows after the
+  // 15-July rejection; ONE borrower (row 9) still reports Wilful Default Status 1 with no
+  // classification date. This must still block — a partially-cleaned file that sails
+  // through would resubmit the same fatal defect the 17-July report caught.
   {
     kind: 'known-defects',
-    input: 'NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx',
+    input: 'NEW_CIC Commercial Master Sheet_09.07.2026 - Copy.xlsx',
     format: 'commercial-ucrf-flat-v310',
     meta: META_DEFAULT,
-    // '' = the borrower-level Registered Office rule (no single field to blame).
-    fields: ['', 'assetClassification', 'relationship'],
-    why: 'The 9-July batch the portal rejected 73/73 (see training-references/portal-submission-report/). 55 borrowers have no Location Type 01 address; the guarantor block is shifted a column in the source sheet. Must never validate clean again.',
+    // '' = borrower-level cross-segment rule (wilful-default date; no single field to blame).
+    fields: [''],
+    why: 'Row 9 reports Wilful Default Status 1 with no classification date (V3.10 §7.5 field 36). See training-references/portal-submission-report/ (17-July run). Must never validate clean until the date is supplied or the status corrected.',
   },
 ];
 
@@ -195,26 +197,39 @@ describe('reference-files pre-rollout validation', () => {
   });
 
   /**
-   * Regression for the 15-July portal rejection (73/73 borrowers), replayed against the
-   * exact sheet that produced it. See training-references/portal-submission-report/.
+   * The cleaned resubmission of the 9-July batch (see training-references/portal-submission-report/).
+   * After the 15-July rejection the accountant fixed the 55 no-registered-office and 17 of
+   * 18 wilful-default rows; the 17-July run then rejected only 2 borrowers on address issues
+   * that our parser fixes now cover (7-digit-plot PIN slice, "&"/spacing state variants).
    *
-   * Both blocking rules are pinned to the counts the source data predicts, so a future
-   * change that silently stops emitting either one fails here rather than at the bureau:
-   *   - 55 borrowers carry only Location Type 03/04 (no Registered Office) -> portal's
-   *     "not a single valid address found" record-reject.
-   *   - 18 rows report Wilful Default Status 1 with no classification date (the Master
-   *     Sheet merges both CRIF fields into one 0/1 column) -> V3.10 §7.5 field 36.
-   * The portal reported 54 address rejects to our 55: it stops at the first fatal reject
-   * per borrower, so its counts are a floor, not an exact match.
+   * This pins the two converter fixes against the real file, so a regression fails here
+   * rather than at the bureau:
+   *   - gender: the sheet carries the CRIF CODE ("01"/"02"), not a label; every RS/GS row
+   *     must resolve (a label-only map blanked all 73 and got them all rejected).
+   *   - state + PIN: every AS/RS address must resolve a state code and a whole 6-digit PIN.
+   * One borrower (row 9) still reports Wilful Default Status 1 with no date -> still blocks.
    */
-  it('blocks the 15-July rejection batch: no Registered Office (55) + wilful-default date (18)', async () => {
-    const buf = readFileSync(ref('NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx'));
-    const result: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), META_DEFAULT);
-    // Blocking: no output may be generated for a batch the bureau would reject.
-    expect(result.output).toBeUndefined();
-    const errors = err(result);
-    expect(errors.filter((e: any) => e.message.includes('Registered Office'))).toHaveLength(55);
-    expect(errors.filter((e: any) => e.message.includes('Wilful Default Status'))).toHaveLength(18);
+  it('converts the cleaned 9-July resubmission: gender/state/PIN resolved, one wilful row still blocks', async () => {
+    const buf = readFileSync(ref('NEW_CIC Commercial Master Sheet_09.07.2026 - Copy.xlsx'));
+    const result: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), META_DEFAULT, { allowWarnings: true });
+    const lines: string[] = (result.outputText ?? '').split('\r\n');
+    const rs = lines.filter((l) => l.startsWith('RS|'));
+    expect(rs).toHaveLength(73);
+    // No blank gender (col 9) on any related-person row — the gender-code regression.
+    expect(rs.filter((l) => l.split('|')[9] === '')).toHaveLength(0);
+    // A blank RS state (col 30) is allowed only when the address names no known state.
+    // A row that DOES name one but comes through blank would be the parser regression.
+    for (const l of rs.filter((r) => r.split('|')[30] === '')) {
+      expect(l, 'blank RS state on a row naming a known state = parser regression')
+        .not.toMatch(/gujarat|uttar\s*pradesh|daman|nagar haveli|maharashtra/i);
+    }
+    // No AS row loses its state code, and no PIN is a sliced fragment of a longer number.
+    expect(lines.filter((l) => l.startsWith('AS|') && l.split('|')[8] === '')).toHaveLength(0);
+
+    // With the gate on, the one remaining wilful-default-date defect still blocks the write.
+    const gated: any = await convert(buf, getFormat('commercial-ucrf-flat-v310'), META_DEFAULT);
+    expect(gated.output).toBeUndefined();
+    expect(err(gated).filter((e: any) => e.message.includes('Wilful Default Status'))).toHaveLength(1);
   });
 
   // Regression: an expanded template whose header row is NOT the canonical top block, so

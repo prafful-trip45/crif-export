@@ -243,11 +243,20 @@ const REPAYMENT_FREQUENCY = buildLegend([
   { code: '08', num: '8', labels: ['Others'] },
 ]);
 
-/** Gender text -> CRIF code + courtesy prefix (RS / GS individuals). V3.9 uses title-case
+/** Gender text -> CRIF code (RS / GS individuals). The Master Sheet may carry the CRIF
+ * code itself ("01"), the dropdown number ("1"), or a label ("Male") — accountants use
+ * all three, and the real NEW_CIC sheets put the CODE in the cell. Accept every spelling;
+ * a label-only map silently blanks a code-bearing sheet, which rejects every RS/GS
+ * segment at the bureau ("gender not per catalogue"). */
+const GENDER_CODE: Record<string, string> = {
+  male: '01', '01': '01', '1': '01',
+  female: '02', '02': '02', '2': '02',
+  transgender: '03', '03': '03', '3': '03',
+};
+/** Courtesy prefix keyed by the RESOLVED CRIF code (not the raw text). V3.9 uses title-case
  * (`Mr`/`Ms`); V3.10 upper-cases it (`MR`/`MS`) — selected via FlatOpts.prefixUpper. */
-const GENDER_CODE: Record<string, string> = { male: '01', female: '02', transgender: '03' };
-const GENDER_PREFIX: Record<string, string> = { male: 'Mr', female: 'Ms', transgender: '' };
-const GENDER_PREFIX_UPPER: Record<string, string> = { male: 'MR', female: 'MS', transgender: '' };
+const GENDER_PREFIX: Record<string, string> = { '01': 'Mr', '02': 'Ms', '03': '' };
+const GENDER_PREFIX_UPPER: Record<string, string> = { '01': 'MR', '02': 'MS', '03': '' };
 
 /**
  * Per-version behaviour toggles. V3.9 (the legacy accountant convention) vs V3.10 (the
@@ -453,10 +462,15 @@ const STATE_LOOKUP: Array<{ needle: string; name: string; code: string }> = (() 
 function findState(lower: string): { name: string; code: string; index: number } | undefined {
   let best: { name: string; code: string; index: number; end: number } | undefined;
   for (const s of STATE_LOOKUP) {
+    // Build the needle so the separators BETWEEN its words are flexible: real sheets
+    // write "dadra& nagar haveli", "dadra and nagar haveli", even "uttarpradesh" with
+    // no gap at all. Split the needle on any non-alphanumeric run and rejoin the word
+    // parts with `[\s&.,-]*` so any spacing/punctuation (or none) between them matches.
+    const parts = s.needle.split(/[^a-z0-9]+/).filter(Boolean).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     // Leading `\b` keeps a name from matching inside a longer word ("goa" in "goanna").
     // The trailing edge instead requires a non-letter, because accountants routinely
     // run the PIN straight onto the state ("…Gujarat396191") where `\b` cannot match.
-    const re = new RegExp(`\\b${s.needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`);
+    const re = new RegExp(`\\b${parts.join('[\\s&.,-]*')}(?![a-z])`);
     const m = re.exec(lower);
     if (!m) continue;
     const end = m.index + m[0].length;
@@ -508,6 +522,20 @@ function cleanCityToken(token: string): string {
  *     "<street>, <City> - <PIN>. COUNTRY" form — Line 1 is the street portion (tail
  *     stripped), city from the PIN tail, state via CITY_STATE lookup.
  */
+/**
+ * The Indian PIN is the LAST standalone 6-digit run in the address text. A plain
+ * `/\d{6}/` matches six digits inside a longer number too — a 7-digit plot number
+ * like "Plot No-1577158" yielded a bogus "577158" PIN that the bureau rejected
+ * (15-Jul portal report, rows 14/65). Requiring a non-digit on both sides keeps the
+ * PIN whole, and scanning to the last match handles a plot number appearing first.
+ */
+function lastPinMatch(s: string): { pin: string; index: number } | undefined {
+  const re = /(?<!\d)(\d{6})(?!\d)/g;
+  let last: { pin: string; index: number } | undefined;
+  for (let m = re.exec(s); m; m = re.exec(s)) last = { pin: m[1]!, index: m.index };
+  return last;
+}
+
 function splitAddress(raw: FieldValue): {
   line1: string;
   city: string;
@@ -521,7 +549,7 @@ function splitAddress(raw: FieldValue): {
   }
   const st = findState(full.toLowerCase());
   if (st) {
-    const pinCode = /(\d{6})\b/.exec(full)?.[1] ?? '';
+    const pinCode = lastPinMatch(full)?.pin ?? '';
     const before = full.slice(0, st.index).replace(/[\s,\-]+$/, '');
     const lastComma = before.lastIndexOf(',');
     const city = (lastComma >= 0 ? before.slice(lastComma + 1) : before.split(/\s+/).pop() ?? '').trim();
@@ -531,8 +559,8 @@ function splitAddress(raw: FieldValue): {
   // Older "<street>, <City> - <PIN>. COUNTRY" form: strip the tail off Line 1.
   let s = full.replace(/[.,\s]*india\.?\s*$/i, '').trim();
   let city = '';
-  const pinMatch = /(\d{6})\b/.exec(s);
-  const pinCode = pinMatch?.[1] ?? '';
+  const pinMatch = lastPinMatch(s);
+  const pinCode = pinMatch?.pin ?? '';
   if (pinMatch) {
     const beforePin = s.slice(0, pinMatch.index);
     const lastComma = beforePin.lastIndexOf(',');
@@ -706,7 +734,7 @@ function explode(
 
   // ---- RS (related person) — only when a related person is present ----
   if (strNA(input.relatedName) !== '') {
-    const g = str(input.relatedGender).toLowerCase();
+    const gCode = GENDER_CODE[str(input.relatedGender).toLowerCase()] ?? '';
     const ra = resolveAddress(input.relatedAddress);
     seeds.push({
       tag: 'RS',
@@ -716,9 +744,9 @@ function explode(
         relationshipDuns: DEFAULTS.relationshipDuns,
         relatedType: '2', // Resident Indian Individual (individual related person)
         relationship: mapLegend(RELATIONSHIP_TYPE, input.relationshipType) ?? '',
-        namePrefix: prefixMap[g] ?? '',
+        namePrefix: prefixMap[gCode] ?? '',
         fullName: strNA(input.relatedName),
-        gender: GENDER_CODE[g] ?? '',
+        gender: gCode,
         dateOfBirth: ddmmyyyy(input.relatedDob),
         rsPan: strNA(input.relatedPan),
         rsAddressLine1: ra.line1,
@@ -769,7 +797,7 @@ function explode(
   for (const gtor of readGuarantorBlocks(ctx.rawCells)) {
     const name = strNA(gtor.fullName) || strNA(gtor.entityName);
     if (name === '') continue;
-    const g = strNA(gtor.gender).toLowerCase();
+    const gCode = GENDER_CODE[strNA(gtor.gender).toLowerCase()] ?? '';
     const ga = resolveAddress(gtor.address);
     seeds.push({
       tag: 'GS',
@@ -778,9 +806,9 @@ function explode(
         _tag: 'GS',
         gsDuns: DEFAULTS.relationshipDuns,
         gsRelatedType: gsRelType(mapLegend(RELATED_TYPE, gtor.type) ?? '', opts),
-        gsNamePrefix: prefixMap[g] ?? '',
+        gsNamePrefix: prefixMap[gCode] ?? '',
         gsFullName: name,
-        gsGender: GENDER_CODE[g] ?? '',
+        gsGender: gCode,
         gsDateOfBirth: ddmmyyyy(gtor.dob),
         gsPan: strNA(gtor.pan),
         gsAddressLine1: ga.line1,

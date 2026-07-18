@@ -143,7 +143,7 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
    */
   it('maps gender from the sheet code ("01"/"02"), not just the label', async () => {
     const buf = readFileSync(
-      join(here, '../training-references/crif-reporting-io/NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx'),
+      join(here, '../training-references/crif-reporting-io/NEW_CIC Commercial Master Sheet_09.07.2026 - Copy.xlsx'),
     );
     // allowWarnings: this sheet also carries unrelated data defects (no Registered
     // Office address, shifted guarantor block) that now correctly block the write.
@@ -174,7 +174,7 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
    */
   it('resolves state codes across "&"/"and"/spacing spelling variants', async () => {
     const buf = readFileSync(
-      join(here, '../training-references/crif-reporting-io/NEW_CIC Commercial Data Master Sheet_09.07.2026.xlsx'),
+      join(here, '../training-references/crif-reporting-io/NEW_CIC Commercial Master Sheet_09.07.2026 - Copy.xlsx'),
     );
     const result = await convert(
       buf,
@@ -260,6 +260,11 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
 
     // The real row-14 address: a 7-digit plot number precedes the true PIN.
     expect(await pinFor('X-Creative Textile Mill, Plot No-1577158, 2Nd Phase,Gidc Vapi, Gujarat-396195')).toBe('396195');
+    // Discriminating case: a 7-digit number AFTER the true PIN. "last 6 digits" would slice
+    // the plot number; only "last STANDALONE 6-digit run" keeps the real PIN.
+    expect(await pinFor('Survey 396230, Khanvel, Plot No 1234567, Gujarat')).toBe('396230');
+    // A 6-digit run glued to a 7th digit is not a PIN — no half-match.
+    expect(await pinFor('Shop 5, Khanvel, Gujarat 3962301')).toBe('');
     // Plain trailing PIN still works, with and without a preceding number.
     expect(await pinFor('Shop 4, Vapi, Gujarat-396191')).toBe('396191');
     expect(await pinFor('Plot 12345678, Vapi, Gujarat 396191')).toBe('396191');
