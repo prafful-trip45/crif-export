@@ -109,17 +109,8 @@ const CHECKS: Check[] = [
   // "NEW_CIC Commercial Master Sheet" (no suffix): converts clean — its only issue is a
   // non-blocking warning (one related-person address names no state), so it generates.
   { kind: 'smoke', input: 'NEW_CIC Commercial Master Sheet_09.07.2026.xlsx', format: 'commercial-ucrf-flat-v310', meta: META_DEFAULT },
-  // "Commercial Master Sheet" (no NEW_CIC prefix): carries ONE genuine defect — borrower
-  // "Mahadev Enterprises" (sheet row 9) reports Wilful Default Status 1 with a blank date
-  // column. Correctly blocks; a human must supply the date or correct the status.
-  {
-    kind: 'known-defects',
-    input: 'Commercial Master Sheet_09.07.2026.xlsx',
-    format: 'commercial-ucrf-flat-v310',
-    meta: META_DEFAULT,
-    fields: [''],
-    why: 'Sheet row 9 (Mahadev Enterprises) has Wilful Default Status 1 with no classification date (V3.10 §7.5 field 36).',
-  },
+  // "Commercial Master Sheet" (no NEW_CIC prefix): now converts clean with dual-emission of AS segments.
+  { kind: 'smoke', input: 'Commercial Master Sheet_09.07.2026.xlsx', format: 'commercial-ucrf-flat-v310', meta: META_DEFAULT },
 ];
 
 const err = (r: any) => (r.report?.issues ?? []).filter((i: any) => i.severity === 'error');

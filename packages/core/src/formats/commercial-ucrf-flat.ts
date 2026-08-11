@@ -727,18 +727,27 @@ function explode(
   // Address Line 1 keeps the full text; City / State (District field) / State-code /
   // PIN are extracted from it (or from explicit columns when the template has them).
   // Country carries the telephone STD code per the sample.
+  //
+  // Dual-Emission for Bureau Compliance: CRIF V3.10 Catalogue 8.4 mandates that every
+  // borrower MUST have at least one Registered Office (01) address. Flat Master Sheets
+  // carry only one address column. If the user selects a non-01 location type (e.g. 03
+  // Warehouse, 04 Plant), we emit TWO AS segments:
+  // 1. Mandatory 01 Registered Office AS segment (using the primary address)
+  // 2. The user-selected secondary AS segment (03 / 04 / 02 / 05 / 06)
   const ba = resolveAddress(input.address, input.borrowerCity, input.borrowerState, input.borrowerPin);
+  const userLocType = mapLegend(LOCATION_TYPE, input.locationType);
+  const primaryLocType = userLocType || DEFAULTS.officeLocationType;
+
+  // 1. Always emit the mandatory Registered Office (01) AS segment
   seeds.push({
     tag: 'AS',
     flag: 2,
     values: row({
       _tag: 'AS',
-      officeLocationType: mapLegend(LOCATION_TYPE, input.locationType) || DEFAULTS.officeLocationType,
+      officeLocationType: '01',
       officeDunsNumber: strNA(input.officeDuns) || DEFAULTS.officeDuns,
       addressLine1: ba.line1,
       cityTown: ba.city,
-      // District carries the CITY, not the state — a state name (e.g. "Karnataka")
-      // only drives the 2-digit State code, it never goes in District.
       district: ba.city,
       stateCode: ba.stateCode,
       pinCode: ba.pinCode,
@@ -746,6 +755,26 @@ function explode(
       mobileNumber: strNA(input.contactNo),
     }),
   });
+
+  // 2. If the user specified a non-01 location type (e.g. 03, 04), dual-emit the 2nd AS segment
+  if (primaryLocType !== '01') {
+    seeds.push({
+      tag: 'AS',
+      flag: 2,
+      values: row({
+        _tag: 'AS',
+        officeLocationType: primaryLocType,
+        officeDunsNumber: strNA(input.officeDuns) || DEFAULTS.officeDuns,
+        addressLine1: ba.line1,
+        cityTown: ba.city,
+        district: ba.city,
+        stateCode: ba.stateCode,
+        pinCode: ba.pinCode,
+        country: DEFAULTS.countryCode,
+        mobileNumber: strNA(input.contactNo),
+      }),
+    });
+  }
 
   // ---- RS (related person) — only when a related person is present ----
   if (strNA(input.relatedName) !== '') {

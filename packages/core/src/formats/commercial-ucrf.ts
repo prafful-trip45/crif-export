@@ -131,7 +131,7 @@ const AS: SegmentSpec = {
   tag: 'AS',
   encoding: 'pipe-delimited',
   flag: 2,
-  cardinality: 'one-per-borrower',
+  cardinality: 'many',
   fields: [
     tag('AS'),
     opt('officeLocationType', 'Borrower Office Location Type'),
