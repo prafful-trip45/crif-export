@@ -24,7 +24,8 @@ $$\text{Pipes} = \text{Field Count} - 1$$
 | **`BS`** | Borrower Segment | 28 Fields | **27 Pipes** | `bsFiller` |
 | **`AS`** | Address Segment | 18 Fields | **17 Pipes** | `asFiller2` |
 | **`RS`** | Related Person Segment | 40 Fields | **39 Pipes** | `rsFiller2` |
-| **`CR`** | Credit Facility Segment | **44 Fields** | **43 Pipes** | `ufceAmount` (Field 44 / Index 43) |
+| **`CR`** | Credit Facility Segment (V3.10) | **45 Fields** | **44 Pipes** | `ufceDate` (Field 45 / Index 44) |
+| **`CR (V3.9)`** | Credit Facility Segment (Legacy) | 44 Fields | 43 Pipes | `ufceAmount` (Field 44 / Index 43) |
 | **`GS`** | Guarantor Segment | 38 Fields | **37 Pipes** | `gsFiller` |
 | **`SS`** | Security Segment | 7 Fields | **6 Pipes** | `ssFiller` |
 | **`CD`** | Cheque Dishonour Segment | 8 Fields | **7 Pipes** | `cdFiller` |
@@ -39,15 +40,15 @@ An un-truncated output (`OUTPUT.txt`) contained **45 pipe delimiters (46 fields)
 ```text
 CR|1947555888||04062025|3500000|INR|0410||01||1776905||||0001||0|||||||||01|||||||||0||00|||||||||
 ```
-Because the standard wire specification expects **44 fields (43 pipes)** ending at `ufceAmount`, the extra two trailing pipes caused portal rejection:
-> *"Segment CR delimiter count mismatch: expected 43 delimiters, found 45"*.
+Because the standard wire specification expects 44 pipes in V3.10 (45 fields), an extra 45th pipe delimiter (46 fields) caused portal rejection:
+> *"Segment CR delimiter count mismatch: expected 44 delimiters, found 45"*.
 
 ### The Resolution in V3.10 Engine
-1. **Standard Wire Emission**: The V3.10 engine emits the standard **44 fields (43 pipe delimiters)** for `CR`, stopping at `ufceAmount` (Field 44):
+1. **V3.10 Wire Emission**: The V3.10 engine emits **45 fields (44 pipe delimiters)** for `CR`, ending at `ufceDate` (Field 45):
    ```text
-   CR|1947555888||04062025|3500000|INR|0410||01|0|1776905||||0001||0|||||||||01|||||||||0||00|||||||
+   CR|1947555888||04062025|3500000|INR|0410||01|0|1776905||||0001||0|||||||||01|||||||||0||00||||||||
    ```
-2. **PDF V3.10 Extension Support**: In the 13th April 2026 PDF manual (Table 7.5, Page 39), Field 45 is listed as `UFCE Date`. When explicit `UFCE Date` data is supplied, the V3.10 specification emits 45 fields (44 pipes).
+2. **Legacy V3.9 Support**: Legacy V3.9 profile emits 44 fields (43 pipe delimiters) ending at `ufceAmount`.
 
 ---
 

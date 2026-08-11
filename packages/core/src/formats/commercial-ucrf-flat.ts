@@ -9,7 +9,7 @@ import type {
 } from '../core/types.js';
 import { formatDdmmyyyy } from '../encoding/formatters/date.js';
 import { coerceCell } from '../input/coerce.js';
-import { commercialUcrf } from './commercial-ucrf.js';
+import { commercialUcrf, commercialUcrfV310 } from './commercial-ucrf.js';
 import { STATE_CODE } from './enums/commercial-enums.js';
 
 /**
@@ -1052,6 +1052,24 @@ export function reportingCycleCode(reportingDate: Date): string {
   return 'ME';
 }
 
+const FLAT_BODY_V310: SegmentSpec[] = commercialUcrfV310.body.map((seg) => {
+  if (seg.tag === 'SS') {
+    return {
+      ...seg,
+      fields: seg.fields.map((f) => (f.key === 'ssCurrency' ? { ...f, default: undefined } : f)),
+    };
+  }
+  if (seg.tag === 'CR') {
+    return {
+      ...seg,
+      fields: seg.fields.map((f) =>
+        f.key === 'wilfulDefaultDate' ? { ...f, type: 'string' as const } : f,
+      ),
+    };
+  }
+  return seg;
+});
+
 /**
  * Commercial UCRF **V3.10** profile — same mapping engine as the V3.9 flat format, with
  * the current bureau conventions: HD Reporting cycle derived from the reporting date
@@ -1064,6 +1082,7 @@ export const commercialUcrfFlatV310: FormatSpec = {
   id: 'commercial-ucrf-flat-v310',
   label: 'Commercial UCRF V3.10',
   version: '3.10',
+  body: FLAT_BODY_V310,
   // HD Reporting-cycle code derived from the reporting date (W1=9th, W2=16th, W3=23rd,
   // ME=month-end); an explicit meta.infoType (e.g. DL/DC/AH/RR) still overrides.
   buildHeaderRow: (meta) => ({

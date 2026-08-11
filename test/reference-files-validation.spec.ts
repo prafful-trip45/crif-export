@@ -193,7 +193,7 @@ describe('reference-files pre-rollout validation', () => {
     expect(out[1]).toBe('BS|HO||MLT CORPORATE SOLUTIONS PVT LTD||||AAQCM0381D|||||11|03|06|60204||||||||||||');
     // District = city (Bengaluru), Office DUNS default, state code 16.
     expect(out[2]).toBe('AS|01|999999999|[#7, Old No. 15/1, 80 ft Road, 2nd Phase, Girinagar|||Bengaluru|Bengaluru|16|560085|079|9900737072||||||');
-    expect(out[4]).toBe('CR|1947555888||04062025|3500000|INR|0410||01|0|1922993||||0001||0|||||||||01|||||||||0||00|||||||'); // drawing-power 0, wilful blank
+    expect(out[4]).toBe('CR|1947555888||04062025|3500000|INR|0410||01|0|1922993||||0001||0|||||||||01|||||||||0||00||||||||'); // drawing-power 0, wilful blank, 44 pipes (45 fields)
     // One GS, unpadded relType (2), upper-case prefix (MS). Name reflects the input cell.
     expect(out[5]).toBe('GS|999999999|2||||MS|Manjula|02|||20061987|BAEPB5560K|||||||||||[#7, Old No. 15/1, 80 ft Road, 2nd Phase, Girinagar|||Bengaluru|Bengaluru|16|560085|079|||||||');
     expect(out[6]).toBe('TS|1|1|');
