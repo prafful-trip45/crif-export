@@ -5,11 +5,13 @@
 > keep **one flat row per borrower** in a "Master Sheet" and we explode it into the
 > per-segment CRIF Commercial UCRF file (HD/BS/AS/RS/CR/GS/SS/CD/TS).
 >
-> Last updated 2026-07-01. Grounded in:
+> Last updated 2026-08-11. Grounded in:
 > - `packages/core/src/core/pipeline.ts`
 > - `packages/core/src/input/workbook-reader.ts` (`readFlatExplodeWorkbook`)
-> - `packages/core/src/formats/commercial-ucrf-flat.ts` (the `explode()` mapping)
-> - `packages/core/src/formats/commercial-ucrf.ts` (segment wire specs)
+> - `packages/core/src/formats/commercial-ucrf-flat.ts` (`commercial-ucrf-flat-v310` primary profile)
+> - `packages/core/src/formats/commercial-ucrf.ts` (segment wire specs & V3.10 profile)
+> - `.agents/skills/crif-commercial-v310-spec-and-delimiter-guidelines/SKILL.md` (Skill reference)
+> - `.agents/skills/crif-commercial-address-dual-emission/SKILL.md` (AS dual-emission skill)
 
 ---
 
@@ -195,4 +197,13 @@ matching + tolerant legend maps rather than fixed positions.
 3. **Distinguish byte-goldens from smoke references** — hand-finalized files can't
    be byte-matched; the validate-references gate must classify each pair.
 4. **Address parsing is the fragile core** — retain Line 1 verbatim, extract
-   city/state/PIN best-effort, and accept that some manual artifacts won't round-trip.
+   City/State/PIN cleanly into dedicated fields.
+
+---
+
+## 5. V3.10 Profile & Delimiter Guidelines
+
+1. **V3.10 Primary Format**: `commercial-ucrf-flat-v310` is the default, primary format for commercial exports.
+2. **V3.9 Deprecation**: `commercial-ucrf-flat` is marked as `Commercial UCRF V3.9 (Deprecated)` and retained for legacy reference validation.
+3. **CR Delimiter Rules**: The standard wire format expects **44 fields (43 pipe delimiters)** for `CR`, ending at `ufceAmount` (Field 44).
+4. **Detailed Reference**: See `.agents/skills/crif-commercial-v310-spec-and-delimiter-guidelines/SKILL.md`.
