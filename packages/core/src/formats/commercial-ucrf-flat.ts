@@ -1008,7 +1008,7 @@ const FLAT_BODY: SegmentSpec[] = commercialUcrf.body.map((seg) => {
 export const commercialUcrfFlat: FormatSpec = {
   ...commercialUcrf,
   id: 'commercial-ucrf-flat',
-  label: 'Commercial UCRF',
+  label: 'Commercial UCRF V3.9 (Deprecated)',
   body: FLAT_BODY,
   // Real CRIF Commercial files end the final TS line with a trailing CRLF.
   trailingLineEnding: true,

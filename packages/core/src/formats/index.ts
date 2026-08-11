@@ -5,8 +5,8 @@ import { mfiCdf } from './mfi-cdf.js';
 
 /** Registry of all supported bureau formats, keyed by id. */
 export const FORMATS: Record<FormatId, FormatSpec> = {
-  'commercial-ucrf-flat': commercialUcrfFlat,
   'commercial-ucrf-flat-v310': commercialUcrfFlatV310,
+  'commercial-ucrf-flat': commercialUcrfFlat,
   'mfi-cdf': mfiCdf,
   'consumer-ucrf12-flat': consumerUcrf12Flat,
 } as Record<FormatId, FormatSpec>;

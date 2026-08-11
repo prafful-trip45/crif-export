@@ -256,6 +256,14 @@ const CR: SegmentSpec = {
   ],
 };
 
+export const CR_V310: SegmentSpec = {
+  ...CR,
+  fields: [
+    ...CR.fields,
+    date('ufceDate', 'UFCE Date'),
+  ],
+};
+
 // GS token order is anchored to a POPULATED golden (38 tokens). It mirrors RS but
 // drops the related-person `relationship`/`businessEntityName`/one-id slots, so the
 // guarantor's name lands at token 7 and the address block at token 23. (Verify against
@@ -437,4 +445,12 @@ export const commercialUcrf: FormatSpec = {
     accountCount: counts.accountCount,
     tsFiller: '',
   }),
+};
+
+export const commercialUcrfV310: FormatSpec = {
+  ...commercialUcrf,
+  id: 'commercial-ucrf-v310',
+  label: 'Commercial UCRF V3.10 (Template)',
+  version: '3.10',
+  body: [BS, AS, RS, CR_V310, GS, SS, CD],
 };
