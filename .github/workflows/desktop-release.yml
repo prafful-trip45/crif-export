@@ -89,6 +89,7 @@ jobs:
       - name: Build app (tauri)
         uses: tauri-apps/tauri-action@v0
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # vite.config reads this from process.env and bakes it via `define`.
           VITE_LICENSE_SERVER_URL: ${{ secrets.VITE_LICENSE_SERVER_URL }}
         with:
