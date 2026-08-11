@@ -16,23 +16,10 @@ on:
 
 jobs:
   build:
+    name: Build Windows Installer (.exe / .msi)
+    runs-on: windows-latest
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            args: "--target aarch64-apple-darwin"
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-            args: "--target x86_64-apple-darwin"
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            args: ""
-
-    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,7 +31,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
       - name: Cache cargo
         uses: swatinem/rust-cache@v2
@@ -106,7 +93,6 @@ jobs:
           VITE_LICENSE_SERVER_URL: ${{ secrets.VITE_LICENSE_SERVER_URL }}
         with:
           projectPath: packages/desktop
-          args: ${{ matrix.args }}
           # On a tag push, create/append to a draft release. Empty tagName on
           # workflow_dispatch keeps it as artifacts only.
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
@@ -114,14 +100,12 @@ jobs:
           releaseDraft: true
           prerelease: false
 
-      - name: Upload installers (manual runs)
+      - name: Upload Windows installers (manual runs)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
-          name: crif-export-${{ matrix.target }}
+          name: crif-export-windows
           path: |
-            packages/desktop/src-tauri/target/**/release/bundle/**/*.dmg
-            packages/desktop/src-tauri/target/**/release/bundle/**/*.app
             packages/desktop/src-tauri/target/**/release/bundle/**/*.msi
             packages/desktop/src-tauri/target/**/release/bundle/**/*.exe
           if-no-files-found: ignore
