@@ -54,8 +54,8 @@ Because the standard wire specification expects 44 pipes in V3.10 (45 fields), a
 
 ## 3. Key V3.10 Business Rules & Defaults
 
-1. **Mandatory DUNS Defaults**:
-   - `officeDunsNumber` (AS), `relationshipDuns` (RS), and `gsDuns` (GS) default to `"999999999"` when unpopulated in single-address Master Sheets.
+1. **DUNS Handling**:
+   - `officeDunsNumber` (AS), `relationshipDuns` (RS), and `gsDuns` (GS) are optional and remain blank (`""`) when unpopulated in Master Sheets (the legacy dummy `"999999999"` fallback has been removed).
 2. **Drawing Power**:
    - Missing Drawing Power defaults to `0` for revolving and credit facilities.
 3. **HD Reporting Cycle Code**:

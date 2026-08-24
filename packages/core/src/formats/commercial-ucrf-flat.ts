@@ -34,9 +34,9 @@ import { STATE_CODE } from './enums/commercial-enums.js';
 const DEFAULTS = {
   memberBranchCode: 'HO', // BS
   officeLocationType: '01', // AS
-  officeDuns: '999999999', // AS — Borrower Office DUNS is always 999999999
+  officeDuns: '', // AS — Borrower Office DUNS (blank if not present in input)
   countryCode: '079', // AS / RS phone area / country
-  relationshipDuns: '999999999', // RS
+  relationshipDuns: '', // RS / GS
   currencyCode: 'INR', // CR
 } as const;
 
