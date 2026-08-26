@@ -25,6 +25,6 @@ export function formatRuleFor(key: string): ((v: string) => boolean) | undefined
   if (k === 'pan') return isPan;
   if (k.includes('pincode') || k === 'pin') return isPin;
   if (k === 'uid' || k === 'aadhaar' || k === 'aadhar') return isAadhaar;
-  if (k.includes('mobile') || k.includes('phone') || k.includes('telephone')) return isPhone;
+  if ((k.includes('mobile') || k.includes('phone') || k.includes('telephone')) && !k.includes('type')) return isPhone;
   return undefined;
 }

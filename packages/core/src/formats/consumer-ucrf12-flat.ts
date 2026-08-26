@@ -55,9 +55,9 @@ const RECORD: SegmentSpec = {
     c('currentBalance', 'Current Balance', { type: 'numeric' }), // TL/13 (AR)
     c('amountOverdue', 'Amt Overdue', { type: 'numeric' }), // TL/14 (AS)
     c('daysPastDue', 'No of Days Past Due', { type: 'numeric' }), // TL/15 (AT)
-    c('suitFiled', 'Suit Filed / Wilful Default'), // TL/21 (AZ)
-    c('assetClassification', 'Asset Classification'), // TL/26 (BB)
-    c('rateOfInterest', 'Rate of Interest'), // TL/38 (BG)
+    c('suitFiled', 'Suit Filed / Wilful Default', { mandatory: true }), // TL/21 (AZ)
+    c('assetClassification', 'Asset Classification', { mandatory: true }), // TL/26 (BB)
+    c('rateOfInterest', 'Rate of Interest', { mandatory: true }), // TL/38 (BG)
   ],
 };
 

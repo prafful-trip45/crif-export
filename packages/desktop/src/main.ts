@@ -92,9 +92,6 @@ function setAppMode(m: AppMode) {
   document
     .querySelectorAll('.validate-only')
     .forEach((el) => el.classList.toggle('hidden', m !== 'validate'));
-  ($('go') as HTMLButtonElement).textContent =
-    m === 'validate' ? 'Validate against output file' : 'Generate submission file';
-  // The workbook-report checkbox is irrelevant when validating.
   $('result').innerHTML = '';
   refreshGo();
 }
@@ -507,11 +504,16 @@ function setRef(bytes: ArrayBuffer, name: string) {
 // ---- generate --------------------------------------------------------------
 function refreshGo() {
   const hasInput = mode === 'file' ? !!pickedBytes : !!val('folderFile');
-  const ready = val('memberId').trim() && hasInput && (appMode !== 'validate' || !!refBytes);
+  const ready = val('memberId').trim() && hasInput;
   const go = $('go') as HTMLButtonElement;
   go.disabled = blocked || !online || !ready;
   // Soft connection gate: explain why the button is disabled (no modal).
   go.title = !online ? 'No internet connection — reconnect to generate.' : '';
+  if (appMode === 'validate') {
+    go.textContent = refBytes ? 'Validate & compare against file' : 'Run validation on Master Sheet';
+  } else {
+    go.textContent = 'Generate submission file';
+  }
 }
 
 function toDdmmyyyy(s: string): string | undefined {
@@ -687,27 +689,38 @@ async function onValidate() {
     await evaluateGate(true);
     if (blocked) return;
   }
-  if (!refBytes) {
-    $('result').innerHTML = '<span class="pill err">ERROR</span> Choose the output file to validate against.';
-    return;
-  }
   const go = $('go') as HTMLButtonElement;
   go.disabled = true;
-  $('result').innerHTML = 'Comparing…';
+  $('result').innerHTML = refBytes ? 'Comparing…' : 'Validating Master Sheet…';
   try {
     const bytes = await resolveBytes();
     const reporting = toDdmmyyyy(val('reportingDate'));
-    const result = await runValidate({
-      formatId: val('format') as FormatId,
-      bytes,
-      referenceBytes: refBytes,
-      memberId: val('memberId').trim(),
-      memberName: val('memberName').trim() || undefined,
-      reportingDate: reporting,
-      creationDate: toDdmmyyyy(val('creationDate')) || reporting,
-      ignoreLineEndings: ($('ignoreEol') as HTMLInputElement).checked,
-    });
-    renderValidate(result.convert, result.compare);
+    if (!refBytes) {
+      // Standalone validation mode on Master Sheet
+      const result = await runConvert({
+        formatId: val('format') as FormatId,
+        bytes,
+        memberId: val('memberId').trim(),
+        memberName: val('memberName').trim() || undefined,
+        reportingDate: reporting,
+        creationDate: toDdmmyyyy(val('creationDate')) || reporting,
+        report: false,
+        allowWarnings: true,
+      });
+      renderValidate(result);
+    } else {
+      const result = await runValidate({
+        formatId: val('format') as FormatId,
+        bytes,
+        referenceBytes: refBytes,
+        memberId: val('memberId').trim(),
+        memberName: val('memberName').trim() || undefined,
+        reportingDate: reporting,
+        creationDate: toDdmmyyyy(val('creationDate')) || reporting,
+        ignoreLineEndings: ($('ignoreEol') as HTMLInputElement).checked,
+      });
+      renderValidate(result.convert, result.compare);
+    }
   } catch (e) {
     $('result').innerHTML = `<span class="pill err">ERROR</span> ${escapeHtml((e as Error).message)}`;
   }
@@ -775,64 +788,79 @@ function renderValidate(c: ConvertResult, cmp?: CompareResult) {
 
   // 1) The headline verdict.
   if (!cmp) {
-    // Input couldn't be converted (blocking errors) → nothing to compare.
+    // Standalone Master Sheet validation mode
     const errCount = c.report.errors.length;
-    html +=
-      `<span class="pill err">CANNOT COMPARE</span> ` +
-      `The input has ${errCount} blocking error${errCount === 1 ? '' : 's'}, so no output could be generated to compare. Fix the input below, then re-run.`;
-  } else if (cmp.match) {
-    html += `<span class="pill ok">MATCH ✓</span> ${escapeHtml(cmp.summary)}`;
+    const warnCount = c.report.warnings.length;
+    if (errCount === 0 && warnCount === 0) {
+      html += `<span class="pill ok">VALIDATION PASS ✓</span> Master Sheet is 100% compliant with bureau rules.`;
+    } else if (errCount > 0) {
+      html += `<span class="pill err">${errCount} BLOCKING ERROR${errCount === 1 ? '' : 'S'}</span> Rejection risk detected — fix marked cells below before submission.`;
+    } else {
+      html += `<span class="pill warn">${warnCount} WARNING${warnCount === 1 ? '' : 'S'}</span> Non-blocking warnings detected — review below before submission.`;
+    }
+    if (c.counts)
+      html += ` &nbsp;·&nbsp; ${c.counts.borrowerCount} borrowers · ${c.counts.accountCount} accounts`;
   } else {
-    html += `<span class="pill err">MISMATCH ✕</span> ${escapeHtml(cmp.summary)}`;
-  }
+    // Byte-comparison mode
+    if (!c.report.ok && !c.output) {
+      const errCount = c.report.errors.length;
+      html +=
+        `<span class="pill err">CANNOT COMPARE</span> ` +
+        `The input has ${errCount} blocking error${errCount === 1 ? '' : 's'}, so no output could be generated to compare. Fix the input below, then re-run.`;
+    } else if (cmp.match) {
+      html += `<span class="pill ok">MATCH ✓</span> ${escapeHtml(cmp.summary)}`;
+    } else {
+      html += `<span class="pill err">MISMATCH ✕</span> ${escapeHtml(cmp.summary)}`;
+    }
 
-  // 2) Size line (when we have a comparison).
-  if (cmp) {
     html +=
       `<div class="note">Generated output: <strong>${cmp.generatedLength.toLocaleString()}</strong> bytes` +
       ` &nbsp;·&nbsp; Your reference file: <strong>${cmp.referenceLength.toLocaleString()}</strong> bytes</div>`;
+
+    if (!cmp.match && cmp.diffs.length) {
+      html += '<table><tr><th>Offset</th><th>Line:Col</th><th>Generated</th><th>Your file</th><th>Context (generated → yours)</th></tr>';
+      html += cmp.diffs
+        .map((d) => {
+          const e = d.expected === undefined ? '∅ (end)' : `0x${d.expected.toString(16).padStart(2, '0')}`;
+          const a = d.actual === undefined ? '∅ (end)' : `0x${d.actual.toString(16).padStart(2, '0')}`;
+          return (
+            `<tr><td>${d.offset}</td><td>${d.line}:${d.column}</td>` +
+            `<td class="sev-error">${e}</td><td class="sev-error">${a}</td>` +
+            `<td><code class="selectable">${escapeHtml(d.expectedContext)}</code><br><code class="selectable">${escapeHtml(d.actualContext)}</code></td></tr>`
+          );
+        })
+        .join('');
+      html += '</table>';
+      if (cmp.truncated)
+        html += '<div class="note">Showing the first differences only — more exist further in the file.</div>';
+    }
   }
 
-  // 3) Byte-level differences.
-  if (cmp && !cmp.match && cmp.diffs.length) {
-    html += '<table><tr><th>Offset</th><th>Line:Col</th><th>Generated</th><th>Your file</th><th>Context (generated → yours)</th></tr>';
-    html += cmp.diffs
-      .map((d) => {
-        const e = d.expected === undefined ? '∅ (end)' : `0x${d.expected.toString(16).padStart(2, '0')}`;
-        const a = d.actual === undefined ? '∅ (end)' : `0x${d.actual.toString(16).padStart(2, '0')}`;
-        return (
-          `<tr><td>${d.offset}</td><td>${d.line}:${d.column}</td>` +
-          `<td class="sev-error">${e}</td><td class="sev-error">${a}</td>` +
-          `<td><code class="selectable">${escapeHtml(d.expectedContext)}</code><br><code class="selectable">${escapeHtml(d.actualContext)}</code></td></tr>`
-        );
-      })
-      .join('');
-    html += '</table>';
-    if (cmp.truncated)
-      html += '<div class="note">Showing the first differences only — more exist further in the file.</div>';
-  }
-
-  // 4) Input-validation warnings/errors, so the user sees data issues too.
+  // Input validation issues table (with Column letters for easy spreadsheet correction)
   if (c.report.issues.length) {
-    html += `<label style="margin-top:16px;">Input validation report <span class="hint">(${c.report.errors.length} error(s), ${c.report.warnings.length} warning(s))</span></label>`;
-    html += '<table><tr><th>Severity</th><th>Sheet</th><th>Row</th><th>Field</th><th>Message</th></tr>';
+    html += `<label style="margin-top:16px;">Validation Issues &amp; Bureau Rejection Risks <span class="hint">(${c.report.errors.length} error(s), ${c.report.warnings.length} warning(s))</span></label>`;
+    html += '<table><tr><th>#</th><th>Severity</th><th>Sheet</th><th>Row</th><th>Column</th><th>Field</th><th>Message</th></tr>';
     html += c.report.issues
       .map(
-        (i) =>
-          `<tr><td class="sev-${i.severity}">${i.severity}</td><td>${escapeHtml(i.sheet)}</td><td>${i.rowNumber}</td><td>${escapeHtml(i.fieldKey)}</td><td>${escapeHtml(i.message)}</td></tr>`,
+        (i, n) =>
+          `<tr><td>${n + 1}</td><td class="sev-${i.severity}">${i.severity}</td><td>${escapeHtml(i.sheet)}</td><td>${i.rowNumber}</td><td>${escapeHtml(i.column ?? '')}</td><td>${escapeHtml(i.fieldKey)}</td><td>${escapeHtml(i.message)}</td></tr>`,
       )
       .join('');
     html += '</table>';
   }
 
-  // 5) Optionally let the user save the freshly-generated output for inspection.
+  // Actions
   html += '<div class="actions" id="saveActions"></div>';
-  html += '<div class="note">Both files are read on this machine only — nothing is uploaded.</div>';
+  html += '<div class="note">All files are processed locally on this machine — nothing is uploaded.</div>';
   $('result').innerHTML = html;
 
+  const actions = $('saveActions');
   if (c.output) {
     const ext = getFormatExtension(val('format') as FormatId);
-    addSaveButton($('saveActions'), 'Save the generated output', submissionFileName(ext), c.output, true);
+    addSaveButton(actions, 'Save submission file', submissionFileName(ext), c.output, false);
+  }
+  if (c.report.issues.length) {
+    addAsyncSaveButton(actions, 'Export validation report (.xlsx)', issuesFileName(), () => exportIssues(c.report), true);
   }
 }
 

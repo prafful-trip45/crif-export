@@ -105,6 +105,7 @@ export interface SegmentSpec {
 }
 
 export type FormatId =
+  | 'consumer-tudf'
   | 'consumer-ucrf12'
   | 'consumer-ucrf12-flat'
   | 'commercial-ucrf'
@@ -117,7 +118,7 @@ export interface FormatSpec {
   id: FormatId;
   label: string;
   version: string;
-  outputExtension: '.txt' | '.CDF';
+  outputExtension: '.txt' | '.CDF' | '.tudf';
   /** '\n'/CRLF-joined records, or one concatenated physical line (MFI). */
   physicalLayout: 'one-line-per-record' | 'single-physical-line';
   /** Line terminator between records (and trailing). */
