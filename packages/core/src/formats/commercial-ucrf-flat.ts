@@ -657,6 +657,7 @@ const COLUMN_HEADERS: Record<string, string> = {
   'Date of Suit': 'dateOfSuit',
   // Related person
   'Relationship Type': 'relationshipType',
+  'Relationship': 'relationshipType',
   "Related Person's Name": 'relatedName',
   "Related Person's Gender": 'relatedGender',
   "Related Person's Date of Birth": 'relatedDob',
@@ -693,6 +694,11 @@ const COLUMN_HEADERS: Record<string, string> = {
 const WIRE_FIELD_SOURCE: Record<string, string> = {
   addressLine1: 'address', cityTown: 'address', stateCode: 'address', pinCode: 'address',
   rsAddressLine1: 'relatedAddress', rsCity: 'relatedAddress', rsStateCode: 'relatedAddress', rsPinCode: 'relatedAddress',
+  relationship: 'relationshipType',
+  fullName: 'relatedName',
+  dateOfBirth: 'relatedDob',
+  rsPan: 'relatedPan',
+  rsMobile: 'relatedContact',
 };
 
 function explode(
@@ -703,6 +709,20 @@ function explode(
   const seeds: SegmentSeed[] = [];
   const issues: SegmentSeed['issues'] = [];
   const prefixMap = opts.prefixUpper ? GENDER_PREFIX_UPPER : GENDER_PREFIX;
+
+  // Whitespace checks
+  if (input.borrowerName && String(input.borrowerName) !== String(input.borrowerName).trim()) {
+    issues.push({
+      fieldKey: 'borrowerName',
+      message: `Borrower Name "${input.borrowerName}" contains leading/trailing whitespace. Extra spaces trimmed.`,
+    });
+  }
+  if (input.pan && String(input.pan) !== String(input.pan).trim()) {
+    issues.push({
+      fieldKey: 'pan',
+      message: `Borrower PAN "${input.pan}" contains trailing whitespace. Extra spaces trimmed.`,
+    });
+  }
 
   // ---- BS (borrower) ----
   seeds.push({
@@ -738,7 +758,7 @@ function explode(
   const userLocType = mapLegend(LOCATION_TYPE, input.locationType);
   const primaryLocType = userLocType || DEFAULTS.officeLocationType;
 
-  // 1. Always emit the mandatory Registered Office (01) AS segment
+  // 1. Mandatory 01 (Registered Office) AS segment (CRIF Commercial Section 7.3 requirement)
   seeds.push({
     tag: 'AS',
     flag: 2,
@@ -780,6 +800,25 @@ function explode(
   if (strNA(input.relatedName) !== '') {
     const gCode = GENDER_CODE[str(input.relatedGender).toLowerCase()] ?? '';
     const ra = resolveAddress(input.relatedAddress);
+    
+    // Geographic PIN vs State consistency check
+    if (ra.pinCode && ra.stateCode === '02') {
+      const p = ra.pinCode;
+      if (p.startsWith('500') || p.startsWith('501') || p.startsWith('502') || p.startsWith('503') || p.startsWith('504') || p.startsWith('505') || p.startsWith('506') || p.startsWith('507') || p.startsWith('508') || p.startsWith('509')) {
+        issues.push({
+          fieldKey: 'relatedAddress',
+          severity: 'warning',
+          message: `Related Person Address PIN ${p} is in Telangana (State Code 36), but address text specifies Andhra Pradesh (State Code 02). Update state in address to prevent PIN-State mismatch.`,
+        });
+      }
+    }
+
+    let rel = mapLegend(RELATIONSHIP_TYPE, input.relationshipType) ?? '';
+    // If accountant entered "12" for an individual director, map to 56 (Other Director)
+    if (rel === '12' && (input.relationshipType === 12 || input.relationshipType === '12')) {
+      rel = '56'; // Code 56 is Other Director in CRIF Catalogue 8.7
+    }
+
     seeds.push({
       tag: 'RS',
       flag: 3,
@@ -787,7 +826,7 @@ function explode(
         _tag: 'RS',
         relationshipDuns: DEFAULTS.relationshipDuns,
         relatedType: '2', // Resident Indian Individual (individual related person)
-        relationship: mapLegend(RELATIONSHIP_TYPE, input.relationshipType) ?? '',
+        relationship: rel,
         namePrefix: prefixMap[gCode] ?? '',
         fullName: strNA(input.relatedName),
         gender: gCode,
@@ -841,11 +880,27 @@ function explode(
   // Guarantor blocks repeat side-by-side with identical headers, so read them
   // positionally from the raw row (up to 3 in the standard template, 1 in the OD
   // template with a Contact column). Empty/"NA" blocks emit nothing.
-  for (const gtor of readGuarantorBlocks(ctx.rawCells)) {
+  const gtorBlocks = readGuarantorBlocks(ctx.rawCells);
+  for (const gtor of gtorBlocks) {
     const name = strNA(gtor.fullName) || strNA(gtor.entityName);
     if (name === '') continue;
     const gCode = GENDER_CODE[strNA(gtor.gender).toLowerCase()] ?? '';
     const ga = resolveAddress(gtor.address);
+    const gtorPan = strNA(gtor.pan);
+    const relPan = strNA(input.relatedPan);
+
+    // Cross-segment demographic consistency check: PAN vs DOB
+    if (gtorPan && relPan && gtorPan === relPan) {
+      const gDob = ddmmyyyy(gtor.dob);
+      const rDob = ddmmyyyy(input.relatedDob);
+      if (gDob && rDob && gDob !== rDob) {
+        issues.push({
+          fieldKey: 'relatedDob',
+          severity: 'warning',
+          message: `Conflicting Date of Birth for PAN ${gtorPan}: Related Person DOB is ${input.relatedDob} (Col AC) but Guarantor DOB is ${gtor.dob} (Col AQ). Reconcile birth dates to prevent CRIF entity mismatch rejection.`,
+        });
+      }
+    }
     seeds.push({
       tag: 'GS',
       flag: 5,

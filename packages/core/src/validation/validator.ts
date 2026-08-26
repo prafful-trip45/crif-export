@@ -65,7 +65,7 @@ function validateRow(report: ValidationReport, spec: SegmentSpec, row: SegmentRo
   // Surface issues raised while reading/mapping the row (e.g. an unmatched lookup).
   for (const ri of row.readerIssues ?? []) {
     report.add({
-      severity: 'error',
+      severity: ri.severity ?? 'error',
       sheet: row.sheet,
       acNo: row.acNo,
       rowNumber: row.rowNumber,

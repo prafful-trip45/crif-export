@@ -16,7 +16,7 @@ export interface SegmentRow {
    * Issues raised while reading/mapping this row (e.g. a flat-explode lookup that
    * failed). Surfaced verbatim by the validator so the report shows them.
    */
-  readerIssues?: Array<{ fieldKey: string; message: string }>;
+  readerIssues?: Array<{ fieldKey: string; message: string; severity?: 'error' | 'warning' }>;
   /**
    * Wire field key -> source spreadsheet column letter it was read from ("AF").
    * Lets the validator point a blank/invalid field back at the exact cell the user
