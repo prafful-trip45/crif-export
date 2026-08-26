@@ -10,6 +10,8 @@ import type { FileMeta, FormatSpec } from './types.js';
 export interface ConvertOptions {
   /** Emit the data file even when only warnings (never errors) are present. */
   allowWarnings?: boolean;
+  /** Force emission of the data file even if there are blocking validation errors. */
+  bypassErrors?: boolean;
   /**
    * Also produce the multi-sheet workbook report (accountant working-file style:
    * one sheet per segment + a `sorting` sheet). Returned as `result.report`Buffer
@@ -20,8 +22,8 @@ export interface ConvertOptions {
 
 /**
  * Full conversion: read workbook -> group by borrower -> validate -> (if ok)
- * encode + emit. On validation failure the data file is suppressed and only the
- * report is returned.
+ * encode + emit. On validation failure the data file is suppressed unless bypassErrors
+ * is set, and the issues report is always returned.
  */
 export async function convert(
   buffer: Buffer | ArrayBuffer,
@@ -34,7 +36,7 @@ export async function convert(
   const report = validate(format, borrowers);
   const counts = computeCounts(format, borrowers);
 
-  if (!report.ok && !options.allowWarnings) {
+  if (!report.ok && !options.allowWarnings && !options.bypassErrors) {
     return { report, counts };
   }
 

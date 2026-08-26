@@ -1,6 +1,6 @@
 {
   "name": "crif-export-desktop",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "type": "module",
   "description": "CRIF Export — native desktop app (macOS + Windows). Excel → CRIF Highmark bureau submission files. Runs the same core engine the CLI/web use, entirely on-device.",

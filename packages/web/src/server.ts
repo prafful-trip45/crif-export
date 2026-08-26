@@ -51,6 +51,7 @@ async function handleConvert(req: import('node:http').IncomingMessage, res: impo
     reportingDate?: string; // DDMMYYYY
     creationDate?: string;
     allowWarnings?: boolean;
+    bypassErrors?: boolean;
     report?: boolean; // also build the multi-sheet workbook report
     // exactly one of these:
     filePath?: string; // server-side path (folder mode)
@@ -72,6 +73,7 @@ async function handleConvert(req: import('node:http').IncomingMessage, res: impo
 
   const result = await convert(buf, format, meta, {
     allowWarnings: payload.allowWarnings,
+    bypassErrors: payload.bypassErrors,
     report: payload.report,
   });
   return json(res, 200, {

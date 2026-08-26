@@ -36,6 +36,7 @@ export interface ConvertInput {
   password?: string;
   report?: boolean;
   allowWarnings?: boolean;
+  bypassErrors?: boolean;
 }
 
 /** DDMMYYYY -> Date (UTC midnight). Empty/short -> today, matching the web/CLI. */
@@ -55,6 +56,7 @@ export async function runConvert(input: ConvertInput): Promise<ConvertResult> {
   };
   return coreConvert(input.bytes, format, meta, {
     allowWarnings: input.allowWarnings,
+    bypassErrors: input.bypassErrors,
     report: input.report,
   });
 }

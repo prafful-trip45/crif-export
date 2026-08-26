@@ -36,6 +36,7 @@ program
   .option('--password <pw>', 'reporting password (MFI/Consumer)')
   .option('--report <file>', 'also write the multi-sheet workbook report (.xlsx, one sheet per segment + sorting)')
   .option('--allow-warnings', 'emit the file even with non-blocking warnings', false)
+  .option('--bypass-errors', 'force generation and emit the file even with validation errors (rejection risk)', false)
   .action(async (opts) => {
     const formatId = opts.format as FormatId;
     let format;
@@ -57,6 +58,7 @@ program
 
     const result = await convert(buf, format, meta, {
       allowWarnings: opts.allowWarnings,
+      bypassErrors: opts.bypassErrors,
       report: Boolean(opts.report),
     });
     printReport(result.report);

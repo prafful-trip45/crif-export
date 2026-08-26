@@ -127,6 +127,7 @@ function init() {
   if (saved.format && formats.some((f) => f.id === saved.format))
     ($('format') as HTMLSelectElement).value = saved.format;
   if (saved.report) ($('report') as HTMLInputElement).checked = true;
+  if (saved.bypassErrors) ($('bypassErrors') as HTMLInputElement).checked = true;
 
   // Folder mode requires native fs — only offer it inside the desktop shell.
   if (!isTauri) {
@@ -135,7 +136,7 @@ function init() {
   }
   setMode(saved.mode === 'folder' && isTauri ? 'folder' : 'file');
 
-  PERSIST.concat(['report']).forEach((id) => $(id).addEventListener('change', saveForm));
+  PERSIST.concat(['report', 'bypassErrors']).forEach((id) => $(id).addEventListener('change', saveForm));
   ['memberId', 'format'].forEach((id) => $(id).addEventListener('input', refreshGo));
   wireDatePickers();
 
@@ -675,6 +676,7 @@ async function onGenerate() {
       reportingDate: reporting,
       creationDate: toDdmmyyyy(val('creationDate')) || reporting,
       report: ($('report') as HTMLInputElement).checked,
+      bypassErrors: ($('bypassErrors') as HTMLInputElement).checked,
     });
     render(result);
   } catch (e) {
@@ -741,9 +743,14 @@ async function resolveBytes(): Promise<ArrayBuffer> {
 // ---- render + save ---------------------------------------------------------
 function render(r: ConvertResult) {
   const errCount = r.report.issues.filter((i) => i.severity === 'error').length;
-  let html = r.report.ok
-    ? '<span class="pill ok">VALID</span>'
-    : `<span class="pill err">${errCount} ERROR${errCount === 1 ? '' : 'S'} — file not generated</span>`;
+  let html = '';
+  if (r.report.ok) {
+    html = '<span class="pill ok">VALID</span>';
+  } else if (r.output) {
+    html = `<span class="pill warn">${errCount} ERROR${errCount === 1 ? '' : 'S'} (BYPASSED)</span> <span class="hint">Generated with validation bypass</span>`;
+  } else {
+    html = `<span class="pill err">${errCount} ERROR${errCount === 1 ? '' : 'S'} — file not generated</span>`;
+  }
   if (r.counts)
     html += ` &nbsp; ${r.counts.borrowerCount} borrowers · ${r.counts.accountCount} accounts`;
 
@@ -759,6 +766,9 @@ function render(r: ConvertResult) {
   }
 
   html += '<div class="actions" id="saveActions"></div>';
+  if (!r.report.ok && r.output) {
+    html += '<div class="note" style="color:#d97706;font-weight:500;">⚠️ Notice: This file was generated using validation bypass despite errors. CRIF bureau gateway may reject it until the issues above are corrected.</div>';
+  }
   html += '<div class="note">Files are written only where you choose to save them — nothing is uploaded.</div>';
   $('result').innerHTML = html;
 
