@@ -146,10 +146,10 @@ const ASSET_CLASSIFICATION = buildLegend([
 /** Business Category (8.3) & Business/Industry Type (8.4): code = dropdown position. */
 const BUSINESS_CATEGORY = buildLegend([
   // V3.10 (8.2) dropped the old 01 MSME / 02 SME codes and added 08 Retail / 09 Agri.
-  // Legacy sheets still type "MSME"/"SME": per the client, MSME now maps to Micro (03);
-  // SME is treated as Small (04) — confirm if that differs.
-  { code: '03', num: '3', labels: ['Micro', 'MSME'] },
-  { code: '04', num: '4', labels: ['Small', 'SME'] },
+  // Legacy sheets still type "MSME"/"SME" or dropdown 1 / 2: per the client, MSME now maps to Micro (03);
+  // SME is treated as Small (04).
+  { code: '03', num: '3', labels: ['Micro', 'MSME', '1'] },
+  { code: '04', num: '4', labels: ['Small', 'SME', '2'] },
   { code: '05', num: '5', labels: ['Medium'] },
   { code: '06', num: '6', labels: ['Large'] },
   { code: '07', num: '7', labels: ['Others'] },
@@ -793,10 +793,17 @@ const WIRE_FIELD_SOURCE: Record<string, string> = {
   addressLine1: 'address', cityTown: 'address', stateCode: 'address', pinCode: 'address',
   rsAddressLine1: 'relatedAddress', rsCity: 'relatedAddress', rsStateCode: 'relatedAddress', rsPinCode: 'relatedAddress',
   relationship: 'relationshipType',
+  relationshipType: 'relationshipType',
   fullName: 'relatedName',
   dateOfBirth: 'relatedDob',
   rsPan: 'relatedPan',
   rsMobile: 'relatedContact',
+  legalConstitution: 'legalConstitution',
+  businessCategory: 'businessCategory',
+  businessIndustryType: 'businessIndustryType',
+  repaymentFrequency: 'repaymentFrequency',
+  assetClassification: 'assetClassification',
+  accountStatus: 'accountStatus',
 };
 
 function explode(
@@ -819,6 +826,29 @@ function explode(
     issues.push({
       fieldKey: 'pan',
       message: `Borrower PAN "${input.pan}" contains trailing whitespace. Extra spaces trimmed.`,
+    });
+  }
+
+  // Unmapped alias / value checks on Borrower
+  if (strNA(input.legalConstitution) !== '' && !mapLegend(LEGAL_CONSTITUTION, input.legalConstitution)) {
+    issues.push({
+      fieldKey: 'legalConstitution',
+      severity: 'warning',
+      message: `Unrecognized Legal Constitution "${input.legalConstitution}". Check allowed catalogue options.`,
+    });
+  }
+  if (strNA(input.businessCategory) !== '' && !mapLegend(BUSINESS_CATEGORY, input.businessCategory)) {
+    issues.push({
+      fieldKey: 'businessCategory',
+      severity: 'warning',
+      message: `Unrecognized Business Category "${input.businessCategory}".`,
+    });
+  }
+  if (strNA(input.businessIndustryType) !== '' && !mapLegend(BUSINESS_INDUSTRY, input.businessIndustryType)) {
+    issues.push({
+      fieldKey: 'businessIndustryType',
+      severity: 'warning',
+      message: `Unrecognized Business/Industry Type "${input.businessIndustryType}".`,
     });
   }
 
@@ -855,6 +885,15 @@ function explode(
   const ba = resolveAddress(input.address, input.borrowerCity, input.borrowerState, input.borrowerPin);
   const userLocType = mapLegend(LOCATION_TYPE, input.locationType);
   const primaryLocType = userLocType || DEFAULTS.officeLocationType;
+
+  // Address parsing validation
+  if (input.address && !ba.stateCode) {
+    issues.push({
+      fieldKey: 'address',
+      severity: 'warning',
+      message: `Could not determine State Code from address "${input.address}". Ensure address includes a recognizable state name or 6-digit Indian PIN code.`,
+    });
+  }
 
   // 1. Mandatory 01 (Registered Office) AS segment (CRIF Commercial Section 7.3 requirement)
   seeds.push({
@@ -899,6 +938,15 @@ function explode(
     const gCode = GENDER_CODE[str(input.relatedGender).toLowerCase()] ?? '';
     const ra = resolveAddress(input.relatedAddress);
     
+    // Address parsing check for related person
+    if (input.relatedAddress && !ra.stateCode) {
+      issues.push({
+        fieldKey: 'relatedAddress',
+        severity: 'warning',
+        message: `Could not determine State Code from Related Person Address "${input.relatedAddress}". Ensure address includes a state name or 6-digit PIN code.`,
+      });
+    }
+
     // Geographic PIN vs State consistency check
     if (ra.pinCode && ra.stateCode === '02') {
       const p = ra.pinCode;
@@ -915,6 +963,12 @@ function explode(
     // If accountant entered "12" for an individual director, map to 56 (Other Director)
     if (rel === '12' && (input.relationshipType === 12 || input.relationshipType === '12')) {
       rel = '56'; // Code 56 is Other Director in CRIF Catalogue 8.7
+    } else if (strNA(input.relationshipType) !== '' && !rel) {
+      issues.push({
+        fieldKey: 'relationshipType',
+        severity: 'warning',
+        message: `Unrecognized Relationship Type "${input.relationshipType}". Check catalogue legend.`,
+      });
     }
 
     seeds.push({
@@ -938,6 +992,29 @@ function explode(
         rsCountry: DEFAULTS.countryCode,
         rsMobile: strNA(input.relatedContact),
       }),
+    });
+  }
+
+  // Facility / CR alias checks
+  if (strNA(input.repaymentFrequency) !== '' && !mapLegend(REPAYMENT_FREQUENCY, input.repaymentFrequency)) {
+    issues.push({
+      fieldKey: 'repaymentFrequency',
+      severity: 'warning',
+      message: `Unrecognized Repayment Frequency "${input.repaymentFrequency}".`,
+    });
+  }
+  if (strNA(input.assetClassification) !== '' && !mapLegend(ASSET_CLASSIFICATION, input.assetClassification)) {
+    issues.push({
+      fieldKey: 'assetClassification',
+      severity: 'warning',
+      message: `Unrecognized Asset Classification "${input.assetClassification}".`,
+    });
+  }
+  if (strNA(input.accountStatus) !== '' && !mapLegend(ACCOUNT_STATUS, input.accountStatus)) {
+    issues.push({
+      fieldKey: 'accountStatus',
+      severity: 'warning',
+      message: `Unrecognized Account Status "${input.accountStatus}".`,
     });
   }
 
