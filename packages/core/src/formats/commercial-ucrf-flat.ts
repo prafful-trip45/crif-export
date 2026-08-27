@@ -435,10 +435,25 @@ const STATE_ALIASES: Record<string, string> = {
   pondicherry: 'Puducherry',
   uttaranchal: 'Uttarakhand',
   // common accountant misspellings seen in real Master Sheets
+  rajsthan: 'Rajasthan',
+  rajashtan: 'Rajasthan',
+  rajastan: 'Rajasthan',
+  rajashthan: 'Rajasthan',
   gujrat: 'Gujarat',
   gujart: 'Gujarat',
   maharastra: 'Maharashtra',
   karnatka: 'Karnataka',
+  chattisgarh: 'Chhattisgarh',
+  chhatisgarh: 'Chhattisgarh',
+  jharkand: 'Jharkhand',
+  telengana: 'Telangana',
+  telgana: 'Telangana',
+  andhra: 'Andhra Pradesh',
+  tamilnadu: 'Tamil Nadu',
+  madhyapradesh: 'Madhya Pradesh',
+  uttarpradesh: 'Uttar Pradesh',
+  westbengal: 'West Bengal',
+  himachal: 'Himachal Pradesh',
   // V3.10 folded the old 08 (Dadra and Nagar Haveli) and 09 (Daman and Diu) into a
   // single combined territory. Sheets still carry the pre-merger short forms, plus
   // the "Nagar"-dropping variant and the capital's name.
@@ -494,15 +509,89 @@ const CITY_STATE: Record<string, { code: string; name: string }> = {
   mumbai: { code: '20', name: 'Maharashtra' },
   pune: { code: '20', name: 'Maharashtra' },
   nagpur: { code: '20', name: 'Maharashtra' },
+  nashik: { code: '20', name: 'Maharashtra' },
   ahmedabad: { code: '11', name: 'Gujarat' },
   surat: { code: '11', name: 'Gujarat' },
   vadodara: { code: '11', name: 'Gujarat' },
+  rajkot: { code: '11', name: 'Gujarat' },
   bengaluru: { code: '16', name: 'Karnataka' },
   bangalore: { code: '16', name: 'Karnataka' },
   chennai: { code: '31', name: 'Tamil Nadu' },
   kolkata: { code: '35', name: 'West Bengal' },
   hyderabad: { code: '36', name: 'Telangana' },
+  jaipur: { code: '29', name: 'Rajasthan' },
+  jodhpur: { code: '29', name: 'Rajasthan' },
+  udaipur: { code: '29', name: 'Rajasthan' },
+  kota: { code: '29', name: 'Rajasthan' },
+  bikaner: { code: '29', name: 'Rajasthan' },
+  ajmer: { code: '29', name: 'Rajasthan' },
+  indore: { code: '19', name: 'Madhya Pradesh' },
+  bhopal: { code: '19', name: 'Madhya Pradesh' },
+  lucknow: { code: '33', name: 'Uttar Pradesh' },
+  kanpur: { code: '33', name: 'Uttar Pradesh' },
+  noida: { code: '33', name: 'Uttar Pradesh' },
+  gurgaon: { code: '12', name: 'Haryana' },
+  gurugram: { code: '12', name: 'Haryana' },
+  chandigarh: { code: '06', name: 'Chandigarh' },
+  patna: { code: '05', name: 'Bihar' },
+  ranchi: { code: '15', name: 'Jharkhand' },
+  bhubaneswar: { code: '26', name: 'Orissa' },
+  raipur: { code: '07', name: 'Chhattisgarh' },
+  dehradun: { code: '34', name: 'Uttarakhand' },
+  kochi: { code: '17', name: 'Kerala' },
+  coimbatore: { code: '31', name: 'Tamil Nadu' },
+  visakhapatnam: { code: '02', name: 'Andhra Pradesh' },
+  vijayawada: { code: '02', name: 'Andhra Pradesh' },
 };
+
+/**
+ * Map Indian Postal PIN code prefix to State / Union Territory.
+ * First 2/3 digits identify the postal circle.
+ */
+function stateFromPin(pin: string): { code: string; name: string } | undefined {
+  if (!/^\d{6}$/.test(pin)) return undefined;
+  const p2 = pin.slice(0, 2);
+  const p3 = pin.slice(0, 3);
+  if (p3 === '744') return { code: '01', name: 'Andaman and Nicobar Islands' };
+  if (p3 === '682') return { code: '18', name: 'Lakshadweep' };
+  if (p3 === '737') return { code: '30', name: 'Sikkim' };
+  if (p3 >= '790' && p3 <= '792') return { code: '03', name: 'Arunachal Pradesh' };
+  if (p3 === '793' || p3 === '794') return { code: '22', name: 'Meghalaya' };
+  if (p3 === '795') return { code: '21', name: 'Manipur' };
+  if (p3 === '796') return { code: '23', name: 'Mizoram' };
+  if (p3 === '797') return { code: '24', name: 'Nagaland' };
+  if (p3 === '799') return { code: '32', name: 'Tripura' };
+  if (p2 === '11') return { code: '25', name: 'New Delhi' };
+  if (p2 === '12' || p2 === '13') return { code: '12', name: 'Haryana' };
+  if (p2 === '14' || p2 === '15' || p2 === '16') return { code: '28', name: 'Punjab' };
+  if (p2 === '17') return { code: '13', name: 'Himachal Pradesh' };
+  if (p2 === '18' || p2 === '19') return { code: '14', name: 'Jammu and Kashmir' };
+  if (p2 >= '20' && p2 <= '28') {
+    if (['246', '248', '249', '262', '263'].includes(p3)) return { code: '34', name: 'Uttarakhand' };
+    return { code: '33', name: 'Uttar Pradesh' };
+  }
+  if (p2 >= '30' && p2 <= '34') return { code: '29', name: 'Rajasthan' };
+  if (p2 >= '36' && p2 <= '39') return { code: '11', name: 'Gujarat' };
+  if (p3 === '403') return { code: '10', name: 'Goa' };
+  if (p2 >= '40' && p2 <= '44') return { code: '20', name: 'Maharashtra' };
+  if (p2 >= '45' && p2 <= '48') return { code: '19', name: 'Madhya Pradesh' };
+  if (p2 === '49') return { code: '07', name: 'Chhattisgarh' };
+  if (p2 === '50') return { code: '36', name: 'Telangana' };
+  if (p2 >= '51' && p2 <= '53') return { code: '02', name: 'Andhra Pradesh' };
+  if (p2 >= '56' && p2 <= '59') return { code: '16', name: 'Karnataka' };
+  if (p2 >= '60' && p2 <= '64') return { code: '31', name: 'Tamil Nadu' };
+  if (p2 >= '67' && p2 <= '69') return { code: '17', name: 'Kerala' };
+  if (p2 >= '70' && p2 <= '74') return { code: '35', name: 'West Bengal' };
+  if (p2 >= '75' && p2 <= '77') return { code: '26', name: 'Orissa' };
+  if (p2 === '78') return { code: '04', name: 'Assam' };
+  if (p2 >= '80' && p2 <= '85') {
+    if (['814', '815', '816', '825', '826', '827', '828', '829', '831', '832', '833', '834', '835'].includes(p3)) {
+      return { code: '15', name: 'Jharkhand' };
+    }
+    return { code: '05', name: 'Bihar' };
+  }
+  return undefined;
+}
 
 /** Strip a trailing country word + a " - <PIN>" / " <PIN>" tail from a city token. */
 function cleanCityToken(token: string): string {
@@ -520,7 +609,7 @@ function cleanCityToken(token: string): string {
  *     address; city = the comma-segment (else word) immediately before the state.
  *   - state is NOT in the text ("…Worli, Mumbai - 400018. INDIA"): the older
  *     "<street>, <City> - <PIN>. COUNTRY" form — Line 1 is the street portion (tail
- *     stripped), city from the PIN tail, state via CITY_STATE lookup.
+ *     stripped), city from the PIN tail, state via CITY_STATE lookup or PIN prefix.
  */
 /**
  * The Indian PIN is the LAST standalone 6-digit run in the address text. A plain
@@ -573,11 +662,20 @@ function splitAddress(raw: FieldValue): {
     }
   }
   const looked = CITY_STATE[city.toLowerCase()];
+  let stateName = looked?.name ?? '';
+  let stateCode = looked?.code ?? '';
+  if (!stateCode && pinCode) {
+    const byPin = stateFromPin(pinCode);
+    if (byPin) {
+      stateCode = byPin.code;
+      stateName = byPin.name;
+    }
+  }
   return {
     line1: s.trim(),
     city,
-    stateName: looked?.name ?? '',
-    stateCode: looked?.code ?? '',
+    stateName,
+    stateCode,
     pinCode,
   };
 }
