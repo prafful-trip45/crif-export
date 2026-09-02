@@ -660,6 +660,22 @@ function splitAddress(raw: FieldValue): {
       city = cleanCityToken(beforePin);
       s = '';
     }
+  } else {
+    // No state name AND no PIN ("…SARDAR ESTATE ROAD , VADODARA"). The trailing
+    // segment is still the city, and CITY_STATE resolves the state from it — without
+    // this the city stayed blank, the lookup below could never fire, and a perfectly
+    // resolvable address raised a blocking `parse` error. Try the trailing
+    // comma-segment first, then the last word — the same narrowing the
+    // state-in-text branch uses ("…, VADODARA" vs "… SOCIETY VADODARA").
+    const lastComma = s.lastIndexOf(',');
+    const segment = cleanCityToken(lastComma >= 0 ? s.slice(lastComma + 1) : s);
+    const candidates = [segment, segment.split(/\s+/).pop() ?? ''];
+    const hit = candidates.find((c) => c && CITY_STATE[c.toLowerCase()]);
+    if (hit) {
+      city = hit;
+      // Line 1 keeps the full address (as in the state-in-text branch); only the
+      // city is lifted out, so no source text is lost from the wire record.
+    }
   }
   const looked = CITY_STATE[city.toLowerCase()];
   let stateName = looked?.name ?? '';
@@ -1064,7 +1080,12 @@ function explode(
     const name = strNA(gtor.fullName) || strNA(gtor.entityName);
     if (name === '') continue;
     const gCode = GENDER_CODE[strNA(gtor.gender).toLowerCase()] ?? '';
-    const ga = resolveAddress(gtor.address);
+    // A guarantor block carries only a free-text address — no State/City/PIN columns of
+    // its own (V3.10 §7.6 fields 27–30 still Require State). Where the guarantor address
+    // does not name a state, fall back to the borrower's explicit State/City/PIN columns
+    // from the same Master Sheet row: it is the same filing, and the alternative is
+    // blocking a file whose state is sitting in the next column.
+    const ga = resolveAddress(gtor.address, undefined, input.borrowerState, undefined);
     const gtorPan = strNA(gtor.pan);
     const relPan = strNA(input.relatedPan);
 
