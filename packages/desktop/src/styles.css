@@ -1,23 +1,71 @@
-:root {
-  --bg: #0f1419;
-  --card: #1a212b;
-  --line: #2b3543;
+/* ===========================================================================
+   CIC — Text & TUDF Converter
+   Two themes on [data-theme]; every colour is a token so a mid-run theme flip
+   is purely visual. Sans = IBM Plex Sans, mono = IBM Plex Mono (self-hosted via
+   @fontsource, imported from main.ts — the app runs with no network).
+   =========================================================================== */
+
+:root,
+[data-theme='dark'] {
+  --bg: #0b0e12;
+  --surface: #11161d;
+  --surface-2: #151b23;
+  --line: #232c38;
+  --line-soft: #1c242e;
   --ink: #e6edf3;
-  --muted: #9aa7b4;
-  --accent: #4f8cff;
-  --ok: #2ea043;
-  --err: #f85149;
-  --warn: #d29922;
+  --muted: #93a1b0;
+  --faint: #66737f;
+  --field: #0c1116;
+  --accent: #5b93ff;
+  --accent-soft: rgba(91, 147, 255, 0.14);
+  --ok: #34b759;
+  --ok-soft: rgba(52, 183, 89, 0.13);
+  --warn: #e0a32e;
+  --warn-soft: rgba(224, 163, 46, 0.13);
+  --err: #f0564b;
+  --err-soft: rgba(240, 86, 75, 0.13);
+  --scheme: dark;
 }
-* {
+
+[data-theme='light'] {
+  --bg: #edeff3;
+  --surface: #ffffff;
+  --surface-2: #f6f8fa;
+  --line: #dce1e8;
+  --line-soft: #e8ecf1;
+  --ink: #121a23;
+  --muted: #4e5a67;
+  --faint: #71808e;
+  --field: #ffffff;
+  --accent: #2c64d8;
+  --accent-soft: rgba(44, 100, 216, 0.1);
+  --ok: #0e7c42;
+  --ok-soft: rgba(14, 124, 66, 0.1);
+  --warn: #8a5d0f;
+  --warn-soft: rgba(138, 93, 15, 0.11);
+  --err: #b93124;
+  --err-soft: rgba(185, 49, 36, 0.1);
+  --scheme: light;
+}
+
+/* Native month/date popups and select menus follow the app theme. */
+[data-theme] {
+  color-scheme: var(--scheme);
+}
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
+
 html,
 body {
-  /* The whole window is draggable-free; keep native scrolling only. */
+  height: 100%;
   -webkit-user-select: none;
   user-select: none;
 }
+
 input,
 select,
 textarea,
@@ -25,124 +73,381 @@ textarea,
   -webkit-user-select: text;
   user-select: text;
 }
+
 body {
   margin: 0;
-  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 400 13.5px/1.5 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg);
   color: var(--ink);
 }
-.wrap {
-  max-width: 880px;
-  margin: 0 auto;
-  padding: 28px 22px 80px;
+
+.mono,
+.mono input {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.apphead {
+
+.hidden {
+  display: none !important;
+}
+[hidden] {
+  display: none !important;
+}
+.grow {
+  flex: 1;
+}
+
+/* Keyboard users get a visible ring everywhere; the pointer never draws one. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---------------------------------------------------------------- shell --- */
+.desk {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 28px 24px 56px;
+}
+
+.frame {
+  max-width: 1240px;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.45);
+}
+
+/* ------------------------------------------------------------- titlebar --- */
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 46px;
+  padding: 0 16px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.lights {
+  display: flex;
+  gap: 7px;
+}
+/* Traffic-light colours are fixed in both themes. */
+.light {
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.light-close {
+  background: #e9695f;
+}
+.light-min {
+  background: #e0b240;
+}
+.light-zoom {
+  background: #54b963;
+}
+.light:hover {
+  filter: brightness(1.12);
+}
+
+.titlebar-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.offline-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.offline-pill i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.titlebar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+}
+.titlebar-user {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.theme-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* -------------------------------------------------------------- toolbar --- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+}
+.mode-blurb {
+  flex: 1;
+  max-width: 520px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+}
+.app-version {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.linkbtn {
+  padding: 0;
+  background: none;
+  border: 0;
+  font-size: 11.5px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.linkbtn:hover {
+  text-decoration: underline;
+}
+.linkbtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ---------------------------------------------------- segmented controls --- */
+.seg {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.seg-opt {
+  padding: 8px 20px;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.seg-opt.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Small variant: input source, report filter chips. */
+.seg-sm {
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+}
+.seg-sm .seg-opt {
+  padding: 5px 11px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+.seg-sm .seg-opt.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------- setup layout --- */
+.split {
+  display: flex;
+  align-items: stretch;
+  min-height: 600px;
+}
+.setup {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  padding: 24px 26px 30px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.section-head h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.section-head .rule {
+  flex: 1;
+  height: 1px;
+  background: var(--line-soft);
+}
+.section-head .seg {
+  align-self: center;
+}
+
+.field {
+  min-width: 0;
+}
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.grid2.top {
+  align-items: start;
+}
+
+.flabel {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.flabel .qual,
+.qual {
+  font-weight: 400;
+  color: var(--faint);
+}
+.label-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  margin-bottom: 7px;
 }
-h1 {
-  font-size: 22px;
-  margin: 0;
+.label-row .flabel {
+  margin-bottom: 0;
 }
-.badge {
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--ok);
-  border: 1px solid rgba(46, 160, 67, 0.4);
-  background: rgba(46, 160, 67, 0.1);
-  border-radius: 999px;
-  padding: 3px 10px;
-  white-space: nowrap;
-}
-.headright {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.account {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--muted);
-}
-.account-user {
-  font-weight: 600;
-  white-space: nowrap;
-}
-.linkbtn {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  font-weight: 700;
+.chip {
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--accent-soft);
   color: var(--accent);
-  cursor: pointer;
-  text-decoration: underline;
+  font-size: 11.5px;
 }
-.linkbtn:hover {
-  opacity: 0.8;
+.chip:empty {
+  display: none;
 }
-.linkbtn:disabled {
-  opacity: 0.5;
-  cursor: default;
+.helper {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--faint);
 }
-.sub {
-  color: var(--muted);
-  margin: 4px 0 22px;
-}
-.card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 18px;
-}
-label {
-  display: block;
-  font-weight: 600;
-  margin: 14px 0 6px;
-}
-.card > label:first-child {
-  margin-top: 0;
-}
-.hint {
-  color: var(--muted);
-  font-weight: 400;
-  font-size: 12px;
-}
-.checkline {
-  font-weight: 400;
-  margin-top: 14px;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
+
+/* ----------------------------------------------------------------- form --- */
 select,
-input[type="text"],
-input[type="password"] {
+input[type='text'],
+input[type='password'],
+input[type='month'] {
   width: 100%;
-  padding: 9px 11px;
-  background: #0d1117;
+  padding: 10px 12px;
+  background-color: var(--field);
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--ink);
   font: inherit;
+  font-size: 13.5px;
 }
-input[type="checkbox"] {
-  width: auto;
-  margin-top: 3px;
+/* The UA chevron ignores padding and sits flush against the border, so draw our
+   own and inset it the same 12px the calendar button uses on the date field. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%2393A1B0' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
 }
-/* Date field: text input + calendar button that opens the native date picker. */
+[data-theme='light'] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%234E5A67' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+}
+input.idfield {
+  letter-spacing: 0.02em;
+}
+input:hover,
+select:hover {
+  border-color: var(--accent);
+}
+input:focus,
+select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .datefield {
   position: relative;
 }
-.datefield > input[type="text"] {
-  padding-right: 38px; /* room for the calendar button */
+.datefield > input[type='text'] {
+  padding-right: 38px;
 }
-.datefield .date-btn {
+.date-btn {
   position: absolute;
   top: 50%;
   right: 6px;
@@ -150,43 +455,33 @@ input[type="checkbox"] {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   background: transparent;
   border: 0;
   border-radius: 6px;
   color: var(--muted);
+  font-size: 13px;
   cursor: pointer;
 }
-.datefield .date-btn:hover {
+.date-btn:hover {
   color: var(--accent);
-  background: rgba(79, 140, 255, 0.12);
+  background: var(--accent-soft);
 }
-/* The native <input type="date"> is only the picker surface — keep it invisible
-   but clickable beneath the button so the OS calendar anchors here. */
-.datefield .date-native {
+/* The native picker is only the popup anchor — invisible, driven by the button. */
+.date-native {
   position: absolute;
   top: 0;
   right: 0;
   width: 36px;
   height: 100%;
-  opacity: 0;
-  border: 0;
   padding: 0;
-  pointer-events: none; /* the button drives it; this just anchors the popup */
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
-/* Reporting-cycle date picker: month/year + four fixed cycle points (no free calendar). */
-.cycle-month {
-  width: 100%;
-  padding: 9px 11px;
-  background: #0d1117;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--ink);
-  font: inherit;
-  color-scheme: dark;
-}
+
 .cycle-seg {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -198,263 +493,1047 @@ input[type="checkbox"] {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 7px 4px;
-  background: #0d1117;
+  padding: 8px 4px;
+  background: var(--field);
   border: 1px solid var(--line);
   border-radius: 8px;
-  color: var(--ink);
-  font: inherit;
-  font-size: 13px;
   cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
 }
-.cycle-opt span {
-  font-size: 11px;
-  color: var(--muted);
+.cycle-opt .day {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: center;
+}
+.cycle-opt .tag {
+  font-size: 10.5px;
+  color: var(--faint);
 }
 .cycle-opt:hover {
   border-color: var(--accent);
 }
 .cycle-opt.active {
   border-color: var(--accent);
-  background: rgba(79, 140, 255, 0.14);
+  background: var(--accent-soft);
 }
-.cycle-opt.active span {
+.cycle-opt.active .day,
+.cycle-opt.active .tag {
   color: var(--accent);
 }
-.row {
+
+/* Switch rows (Options). The checkbox itself is the accessible control. */
+.switchrow {
   display: flex;
-  gap: 14px;
-}
-.row > div {
-  flex: 1;
-}
-.tabs {
-  display: flex;
-  gap: 8px;
-  margin: 6px 0 14px;
-}
-.apptabs {
-  margin: 0 0 18px;
-}
-.apptabs .tab {
-  flex: 1;
-  text-align: center;
-  font-weight: 700;
-  padding: 11px 14px;
-}
-.tab {
-  padding: 8px 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  align-items: flex-start;
+  gap: 12px;
   cursor: pointer;
-  background: #0d1117;
-  color: var(--muted);
 }
-.tab.active {
-  border-color: var(--accent);
+.switchrow + .switchrow {
+  margin-top: -2px;
+}
+.switchrow input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch {
+  display: flex;
+  justify-content: flex-start;
+  width: 34px;
+  height: 20px;
+  flex: none;
+  margin-top: 1px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 0.15s, justify-content 0.15s;
+}
+.switch .knob {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+}
+.switchrow input:checked + .switch {
+  background: var(--accent);
+  justify-content: flex-end;
+}
+.switchrow input:focus-visible + .switch {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.switchrow-text {
+  display: block;
+}
+.switchrow-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--ink);
 }
-.drop {
-  border: 2px dashed var(--line);
-  border-radius: 10px;
-  padding: 28px;
-  text-align: center;
+.switchrow-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+
+/* Checkbox row (ignore line endings). */
+.checkrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
   color: var(--muted);
   cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.checkrow input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.checkrow .checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--field);
+  color: transparent;
+  font-size: 10px;
+  font-weight: 700;
+}
+.checkrow input:checked + .checkbox {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.checkrow input:focus-visible + .checkbox {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ----------------------------------------------------------------- input --- */
+.dropzone {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
+  width: 100%;
+  padding: 30px;
+  background: transparent;
+  border: 1.5px dashed var(--line);
+  border-radius: 10px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
 }
-.drop strong {
-  color: var(--ink);
-  font-size: 15px;
-}
-.drop.over {
+.dropzone:hover,
+.dropzone.over {
   border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.dz-title {
+  font-size: 14px;
+  font-weight: 600;
   color: var(--ink);
 }
-.drop.has-file {
-  border-style: solid;
-  border-color: var(--ok);
-  color: var(--ink);
-  background: rgba(46, 160, 67, 0.08);
+.dz-sub {
+  font-size: 12px;
+  color: var(--muted);
 }
-.drop .fn {
+.kbd {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.dropzone-sm {
+  padding: 18px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.dropzone-sm:hover,
+.dropzone-sm.over {
+  color: var(--ink);
+}
+
+.filecard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.filecard-text {
+  flex: 1;
+  min-width: 0;
+}
+.filecard-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filecard-meta {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.badge-sq {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 8px;
+  font-size: 10px;
   font-weight: 700;
-  color: var(--ink);
-  word-break: break-all;
 }
-.drop .swap {
+.badge-sq.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.badge-sq.err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+.textbtn {
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
   color: var(--accent);
   font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.textbtn:hover {
+  background: var(--accent-soft);
+}
+
+.folder-mode .flabel {
+  margin-top: 14px;
+}
+.path {
+  margin: 8px 0 0;
+  word-break: break-all;
 }
 button.secondary {
   padding: 9px 14px;
-  font-weight: 600;
-  background: #0d1117;
-  color: var(--ink);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
   cursor: pointer;
 }
 button.secondary:hover {
   border-color: var(--accent);
 }
-#folderPath {
-  margin: 8px 0 4px;
-  word-break: break-all;
-}
-button.go {
-  margin-top: 6px;
-  width: 100%;
-  padding: 13px;
-  font-weight: 700;
-  font-size: 15px;
-  background: var(--accent);
-  color: #fff;
-  border: 0;
-  border-radius: 9px;
-  cursor: pointer;
-}
-button.go:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-/* Must win over later equal-specificity rules like `.overlay { display:flex }`
-   (defined further down). Without !important, an element with class
-   "overlay hidden" stays visible because `.overlay` comes later in source order —
-   which made the login/connection/upgrade overlays impossible to hide. */
-.hidden {
-  display: none !important;
-}
-.result {
-  margin-top: 16px;
-}
-.pill {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 700;
-}
-.pill.ok {
-  background: rgba(46, 160, 67, 0.15);
-  color: var(--ok);
-}
-.pill.err {
-  background: rgba(248, 81, 73, 0.15);
-  color: var(--err);
-}
-.pill.warn {
-  background: rgba(210, 153, 34, 0.15);
-  color: var(--warn);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 10px;
-  font-size: 12.5px;
-}
-th,
-td {
-  text-align: left;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--line);
-  vertical-align: top;
-}
-td.sev-error {
-  color: var(--err);
-}
-td.sev-warning {
-  color: var(--warn);
-}
-.actions {
+
+.refblock {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 10px;
-  margin-top: 14px;
+  padding-top: 4px;
 }
-button.dl {
-  padding: 10px 16px;
-  background: var(--ok);
-  color: #fff;
-  border: 0;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 700;
-  font: inherit;
-  font-weight: 700;
-}
-button.dl.alt {
-  background: #0d1117;
-  color: var(--ink);
-  border: 1px solid var(--line);
-}
-code {
-  background: #0d1117;
-  padding: 1px 5px;
-  border-radius: 4px;
-}
-.note {
-  margin-top: 10px;
-  color: var(--muted);
-  font-size: 12px;
+.refblock .flabel {
+  margin-bottom: 0;
 }
 
-/* Blocking "update required" overlay (version gate). */
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(8, 11, 15, 0.86);
-  backdrop-filter: blur(4px);
+/* ------------------------------------------------------------------ rail --- */
+.rail {
+  width: 372px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 20px;
+  background: var(--surface-2);
+  border-left: 1px solid var(--line);
+}
+.rail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+}
+.rail-body.results {
+  gap: 14px;
+}
+.rail h3,
+.outrail h3,
+.railhead {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* Rail toggle: both halves share the width, badge sits inside the active fill. */
+.rail-toggle {
+  border-radius: 8px;
+}
+.rail-toggle .seg-opt {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 7px;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.rail-toggle .seg-opt.active {
+  background: var(--accent);
+  color: #fff;
+}
+.tabbadge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+}
+.seg-opt.active .tabbadge {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+.tabbadge.err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+.tabbadge.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* Readiness checklist + running steps share the row shape. */
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.checkrow-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--line-soft);
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 700;
+}
+.dot.done {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.dot.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+.checkrow-label {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.checkrow-label.pending {
+  color: var(--faint);
+}
+.checkrow-val {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.checkrow-val.pending {
+  color: var(--faint);
+}
+
+.cta {
+  width: 100%;
+  padding: 13px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 18px -8px var(--accent);
+  transition: background 0.12s;
+}
+.cta:disabled {
+  background: var(--line-soft);
+  color: var(--faint);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.cta-hint {
+  margin: -8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--faint);
+}
+
+.recent {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 11px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-align: left;
+  cursor: default;
+}
+.recent-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.recent-dot.warn {
+  background: var(--warn);
+}
+.recent-text {
+  flex: 1;
+  min-width: 0;
+}
+.recent-name {
+  display: block;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+/* ------------------------------------------------------------- progress --- */
+.run-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.run-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.spinner {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.progress {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.progress > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.5s ease;
+}
+.steps .dot {
+  width: 18px;
+  height: 18px;
+}
+.steps .checkrow-item {
+  gap: 11px;
+}
+.step-detail {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--faint);
+}
+.cancel {
+  align-self: flex-start;
+  padding: 7px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cancel:hover {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* -------------------------------------------------------------- outcome --- */
+.outcome-pill {
+  align-self: flex-start;
+  padding: 5px 11px;
+  border-radius: 6px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.outcome-pill.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.outcome-pill.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.outcome-pill.err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+.outcome-note {
+  margin: -4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.findlist {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.findcard {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  text-align: left;
+  cursor: pointer;
+}
+.findcard:hover {
+  border-color: var(--accent);
+}
+.sevchip {
+  flex: none;
+  margin-top: 1px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.sevchip.err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+.sevchip.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.find-text {
+  flex: 1;
+  min-width: 0;
+}
+.find-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.find-where {
+  display: block;
+  margin-top: 3px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--faint);
+  word-break: break-word;
+}
+.find-count {
+  display: block;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.outcard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.outcard-text {
+  flex: 1;
+  min-width: 0;
+}
+.outcard-name {
+  display: block;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  word-break: break-all;
+  color: var(--ink);
+}
+.outcard-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.countgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.countcard {
+  padding: 11px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.countcard .n {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.countcard .k {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.action {
+  width: 100%;
+  padding: 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.action.primary {
+  background: var(--accent);
+  color: #fff;
+}
+.action.secondary {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+}
+.action.secondary:hover {
+  border-color: var(--accent);
+}
+.action:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.railfoot {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--faint);
+}
+.spacer {
+  flex: 1;
+}
+
+/* ------------------------------------------------------------ report view --- */
+.reportview {
+  min-height: 600px;
+}
+.report-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.backbtn {
+  padding: 7px 11px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.backbtn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.report-head .outcome-note {
+  flex: 1;
+  margin: 0;
+}
+.runstamp {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.report-split {
+  display: flex;
+  align-items: stretch;
+  min-height: 540px;
+}
+.report-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px 26px 30px;
+}
+
+.group {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.group-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.group-head .find-title {
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.group-head .find-where {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.group-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.chevron {
+  font-size: 11px;
+  color: var(--faint);
+}
+.group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+.group-fix {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.rowtable {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.rowtable .thead,
+.rowtable .trow {
+  display: grid;
+  grid-template-columns: 74px 62px 1fr;
+  padding: 8px 12px;
+}
+.rowtable .thead {
+  background: var(--field);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.rowtable .trow {
+  background: var(--surface);
+  border-top: 1px solid var(--line-soft);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+}
+.rowtable .trow .r {
+  color: var(--muted);
+}
+.rowtable .trow .c {
+  color: var(--accent);
+}
+.rowtable .trow .v {
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rowtable .tmore {
+  padding: 8px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--line-soft);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.group-rule {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.group-rule b {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.bigcounts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.bigcounts .countcard {
+  padding: 14px;
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+.bigcounts .n {
+  font-size: 21px;
+}
+.bigcounts .k {
+  margin-top: 4px;
+  font-size: 11.5px;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--field);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.panel-head .note {
+  margin-left: auto;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.panel-pre {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.75;
+  color: var(--muted);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.outrail {
+  width: 336px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px 22px;
+  background: var(--surface-2);
+  border-left: 1px solid var(--line);
+}
+.outrail .outcard {
+  padding: 14px;
+}
+.outrail .actions {
+  gap: 9px;
+}
+.hr {
+  height: 1px;
+  background: var(--line);
+}
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fact {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+}
+.fact .k {
+  width: 96px;
+  flex: none;
+  color: var(--faint);
+}
+.fact .v {
+  flex: 1;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  font-weight: 500;
+  word-break: break-all;
+  color: var(--ink);
+}
+
+/* ----------------------------------------------------------- status line --- */
+.statusline {
+  max-width: 1240px;
+  margin: 14px auto 0;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+/* ------------------------------------------------------------- overlays --- */
+.overlay {
+  position: fixed;
+  inset: 0;
   z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 11, 15, 0.86);
+  backdrop-filter: blur(4px);
+}
+[data-theme='light'] .overlay {
+  background: rgba(120, 130, 145, 0.55);
 }
 .overlay-card {
-  background: var(--card);
+  max-width: 440px;
+  padding: 32px 36px;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 32px 36px;
-  max-width: 440px;
   text-align: center;
 }
 .overlay-icon {
-  font-size: 40px;
-  color: var(--accent);
-  line-height: 1;
   margin-bottom: 8px;
+  font-size: 40px;
+  line-height: 1;
+  color: var(--accent);
 }
 .overlay-card h2 {
   margin: 4px 0 10px;
   font-size: 20px;
 }
 .overlay-card p {
-  color: var(--muted);
   margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
 }
-.overlay-card .dl {
-  display: inline-block;
-  text-decoration: none;
-}
-.overlay-card input[type="text"],
-.overlay-card input[type="password"] {
+.overlay-card input {
   margin: 6px 0;
   text-align: left;
 }
-.overlay-card #loginSubmit,
-.overlay-card #connectionRetry {
+.dl {
+  display: inline-block;
   width: 100%;
   margin-top: 10px;
+  padding: 11px 16px;
+  background: var(--accent);
   border: 0;
-  cursor: pointer;
-  font: inherit;
+  border-radius: 9px;
+  color: #fff;
+  font-size: 13.5px;
   font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
 }
-/* Loading state for the Sign in button: spinner + dimmed, non-interactive. */
-.overlay-card #loginSubmit.loading {
+#loginSubmit.loading {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -462,29 +1541,19 @@ code {
   opacity: 0.85;
   cursor: progress;
 }
-.spinner {
+#loginSubmit .spinner {
+  border-color: rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
   width: 15px;
   height: 15px;
-  border: 2px solid rgba(255, 255, 255, 0.4);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  flex: none;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 .login-error {
-  color: var(--err);
-  font-size: 12.5px;
   min-height: 16px;
   margin: 2px 0 4px;
+  font-size: 12.5px;
+  color: var(--err);
 }
 
-/* Sits ABOVE the overlays (z-index 1000) — its main job is to explain the login screen
-   that a revoked session just threw the user back to. */
 .toast {
   position: fixed;
   z-index: 1100;
@@ -493,10 +1562,10 @@ code {
   transform: translateX(-50%);
   max-width: min(560px, calc(100vw - 32px));
   padding: 12px 18px;
-  border-radius: 10px;
-  background: var(--card);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-left: 3px solid var(--warn);
+  border-radius: 10px;
   color: var(--ink);
   font-size: 13.5px;
   line-height: 1.45;
@@ -511,5 +1580,16 @@ code {
   to {
     opacity: 1;
     transform: translate(-50%, 0);
+  }
+}
+
+/* Narrow windows collapse the left pane's two-column grids before the rail
+   gives up any of its 372px floor. */
+@media (max-width: 1150px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+  .bigcounts {
+    grid-template-columns: repeat(2, 1fr);
   }
 }

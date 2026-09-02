@@ -191,10 +191,112 @@ function issue(
 }
 
 /**
+ * V3.10 section catalogue — heading text and the PRINTED page it starts on, read
+ * off "Commercial UCRF - V3.10-Delimited_13th April 2026.pdf" (contents page 2,
+ * confirmed against each body heading). Cite from this table rather than from
+ * memory: the Section-8 numbering shifted by one from V3.9, and State in
+ * particular is 8.5 — 8.6 is Type of Relationship.
+ */
+const V310_SECTIONS: Record<string, { title: string; page: number }> = {
+  '7.1': { title: 'Header Segment (HD)', page: 19 },
+  '7.2': { title: 'Borrower Segment (BS)', page: 21 },
+  '7.3': { title: 'Address Segment (AS)', page: 25 },
+  '7.4': { title: 'Relationship Segment (RS)', page: 27 },
+  '7.5': { title: 'Credit Facility Segment (CR)', page: 33 },
+  '7.6': { title: 'Guarantor Segment (GS)', page: 40 },
+  '7.7': { title: 'Security Segment (SS)', page: 45 },
+  '7.8': { title: 'Dishonour of Cheques Segment (CD)', page: 46 },
+  '7.9': { title: 'File Closure Segment (TS)', page: 47 },
+  '8.1': { title: 'Legal Constitution', page: 48 },
+  '8.2': { title: 'Business Category', page: 48 },
+  '8.3': { title: 'Business / Industry Type', page: 48 },
+  '8.4': { title: 'Location Type', page: 49 },
+  '8.5': { title: 'State', page: 49 },
+  '8.6': { title: 'Type of Relationship', page: 50 },
+  '8.7': { title: 'Currency Code', page: 50 },
+  '8.8': { title: 'Credit Type', page: 54 },
+  '8.9': { title: 'Asset Classification / Days Past Due', page: 56 },
+  '8.10': { title: 'Account Status', page: 56 },
+  '8.11': { title: 'Suit Filed Status', page: 57 },
+  '8.12': { title: 'Transaction Type Code', page: 57 },
+  '8.13': { title: 'Tangible Security Type', page: 57 },
+  '8.14': { title: 'Tangible Security Classification', page: 58 },
+  '8.15': { title: 'Country Code / Nationality', page: 58 },
+  '8.16': { title: 'Tangible Security Coverage', page: 61 },
+  '8.17': { title: 'Guarantee Coverage', page: 61 },
+  '8.18': { title: 'Repayment Frequency', page: 61 },
+  '8.19': { title: 'Assessment Agency / Authority', page: 62 },
+  '8.20': { title: 'Reason for Inward Cheque Dishonour', page: 62 },
+};
+
+/** Segment tag -> the §7 section that defines its field layout. */
+const V310_SEGMENT_SECTION: Record<string, string> = {
+  HD: '7.1',
+  BS: '7.2',
+  AS: '7.3',
+  RS: '7.4',
+  CR: '7.5',
+  GS: '7.6',
+  SS: '7.7',
+  CD: '7.8',
+  TS: '7.9',
+};
+
+/**
+ * Coded field -> the §8 catalogue whose codes it must draw from. Keyed on the
+ * field key's distinguishing suffix so the per-segment variants (`stateCode`,
+ * `rsStateCode`, `gsStateCode`) all land on the same catalogue.
+ */
+const V310_FIELD_CATALOGUE: Array<[RegExp, string]> = [
+  [/stateCode$/i, '8.5'],
+  [/locationType$/i, '8.4'],
+  [/(^|[a-z])constitution$/i, '8.1'],
+  [/businessCategory$/i, '8.2'],
+  [/(business|industry)Type$/i, '8.3'],
+  [/relationshipType$/i, '8.6'],
+  [/^relationship$/i, '8.6'],
+  [/currency/i, '8.7'],
+  [/creditType$/i, '8.8'],
+  [/assetClassification$/i, '8.9'],
+  [/accountStatus$/i, '8.10'],
+  [/suitFiled/i, '8.11'],
+  [/transactionType$/i, '8.12'],
+  [/securityType$/i, '8.13'],
+  [/securityClassification$/i, '8.14'],
+  [/(country|nationality)/i, '8.15'],
+  [/securityCoverage$/i, '8.16'],
+  [/guaranteeCoverage$/i, '8.17'],
+  [/repaymentFrequency$/i, '8.18'],
+  [/assessmentAgency$/i, '8.19'],
+  [/dishonourReason$/i, '8.20'],
+];
+
+const V310_DOC = 'CRIF Commercial UCRF V3.10';
+
+/** "§7.3 Address Segment (AS), p. 25" — section, heading and printed page. */
+function sectionRef(section: string, extra?: string): string {
+  const s = V310_SECTIONS[section];
+  if (!s) return '';
+  return `§${section} ${s.title}, p. ${s.page}${extra ? ` — ${extra}` : ''}`;
+}
+
+/**
+ * A full citation an operator can look up, e.g.
+ * "CRIF Commercial UCRF V3.10 §8.5 State, p. 49; §7.3 Address Segment (AS), p. 25".
+ * The document name is named once; further sections follow bare.
+ */
+function citeV310(sections: Array<[string, string?]>): string {
+  const parts = sections.map(([section, extra]) => sectionRef(section, extra)).filter(Boolean);
+  return parts.length ? `${V310_DOC} ${parts.join('; ')}` : V310_DOC;
+}
+
+/**
  * A human-readable source locator for the bureau rule that produced an issue.
- * Keep this conservative: only cite a numbered V3.10 section where that section
- * is recorded in the maintained bureau guidance; otherwise cite the exact format
- * and segment/field layout instead of inventing a section number.
+ * For Commercial V3.10 this resolves to a numbered section, its heading and the
+ * printed page in the spec PDF, so the operator can open the page and read the
+ * rule. Keep it conservative: only cite a section recorded in `V310_SECTIONS`;
+ * for every other format cite the exact segment/field layout rather than
+ * inventing a section number.
  */
 function referenceFor(
   format: FormatSpec,
@@ -209,17 +311,25 @@ function referenceFor(
 
   if (commercialV310) {
     if (rule === 'portal-mandatory' && /registered office/i.test(message ?? '')) {
-      return 'CRIF Commercial UCRF V3.10 §7.3 (Address Segment Rules); Catalogue 8.4 (Location Type)';
+      return citeV310([['7.3'], ['8.4']]);
     }
     if (key === 'wilfulDefaultStatus' || key === 'wilfulDefaultDate' || /wilful default/i.test(message ?? '')) {
-      return 'CRIF Commercial UCRF V3.10 §7.5, CR fields 35–36 (Wilful Default Status and Date)';
+      return citeV310([['7.5', 'CR fields 35–36, Wilful Default Status and Date']]);
     }
-    if (key === 'stateCode' || key === 'rsStateCode' || key === 'gsStateCode' || rule === 'parse') {
-      return 'CRIF Commercial UCRF V3.10 Catalogue 8.6 (State/Union Territory codes)';
+    // A coded field is governed by its Section-8 catalogue; cite that first, and
+    // the segment layout alongside it so the field's position is findable too.
+    const catalogue = V310_FIELD_CATALOGUE.find(([re]) => re.test(key))?.[1];
+    if (catalogue) {
+      const segment = V310_SEGMENT_SECTION[tag];
+      return citeV310(segment ? [[catalogue], [segment]] : [[catalogue]]);
     }
-    if (tag === 'HD') return 'CRIF Commercial UCRF V3.10 §7.1 (Header Segment)';
-    if (tag === 'AS') return 'CRIF Commercial UCRF V3.10 §7.3 (Address Segment Rules)';
-    if (tag === 'CR') return 'CRIF Commercial UCRF V3.10 §7.5 (Credit Facility Segment)';
+    // A parse failure on an address-derived value points at the State catalogue —
+    // that is what the reader was trying to resolve out of the free-text address.
+    if (rule === 'parse') return citeV310([['8.5']]);
+    const segment = V310_SEGMENT_SECTION[tag];
+    if (segment) {
+      return citeV310([[segment, field ? `field “${label(field)}”` : undefined]]);
+    }
   }
 
   const fieldText = field ? `, field “${label(field)}”` : '';

@@ -7,7 +7,7 @@
  * (ExcelJS + core's `Buffer`/`zlib` use is satisfied by the Vite node-polyfill;
  * see vite.config.ts.)
  */
-import { convert as coreConvert } from '../../core/src/core/pipeline.js';
+import { convert as coreConvert, type ConvertPhase } from '../../core/src/core/pipeline.js';
 import { getFormat, listFormats } from '../../core/src/formats/index.js';
 import { compareOutputs } from '../../core/src/output/comparator.js';
 import { writeIssuesWorkbook } from '../../core/src/output/issues-writer.js';
@@ -16,7 +16,7 @@ import type { ConvertResult, ValidationReport } from '../../core/src/core/result
 import type { CompareResult } from '../../core/src/output/comparator.js';
 
 export { listFormats, getFormat };
-export type { FormatId, ConvertResult, CompareResult };
+export type { FormatId, ConvertResult, CompareResult, ConvertPhase };
 
 /** Build the indexed .xlsx errors/warnings report for a validation result. */
 export async function exportIssues(report: ValidationReport): Promise<Uint8Array> {
@@ -37,6 +37,8 @@ export interface ConvertInput {
   report?: boolean;
   allowWarnings?: boolean;
   bypassErrors?: boolean;
+  /** Live progress: called as each pipeline stage completes. Awaited, so the UI can repaint. */
+  onPhase?: (phase: ConvertPhase, detail?: string) => void | Promise<void>;
 }
 
 /** DDMMYYYY -> Date (UTC midnight). Empty/short -> today, matching the web/CLI. */
@@ -58,6 +60,7 @@ export async function runConvert(input: ConvertInput): Promise<ConvertResult> {
     allowWarnings: input.allowWarnings,
     bypassErrors: input.bypassErrors,
     report: input.report,
+    onPhase: input.onPhase,
   });
 }
 

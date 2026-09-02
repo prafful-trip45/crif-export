@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin:0; background:#0B0E12; }
+  a { color:#5B93FF; text-decoration:none; }
+  a:hover { color:#89B0FF; text-decoration:underline; }
+  :root, [data-theme="dark"] {
+    --bg:#0B0E12; --surface:#11161D; --surface-2:#151B23; --line:#232C38; --line-soft:#1C242E;
+    --ink:#E6EDF3; --muted:#93A1B0; --faint:#66737F; --field:#0C1116;
+    --accent:#5B93FF; --accent-soft:rgba(91,147,255,.14);
+    --ok:#34B759; --ok-soft:rgba(52,183,89,.13);
+    --warn:#E0A32E; --warn-soft:rgba(224,163,46,.13);
+    --err:#F0564B; --err-soft:rgba(240,86,75,.13);
+    --scheme:dark;
+  }
+  [data-theme="light"] {
+    --bg:#EDEFF3; --surface:#FFFFFF; --surface-2:#F6F8FA; --line:#DCE1E8; --line-soft:#E8ECF1;
+    --ink:#121A23; --muted:#4E5A67; --faint:#71808E; --field:#FFFFFF;
+    --accent:#2C64D8; --accent-soft:rgba(44,100,216,.10);
+    --ok:#0E7C42; --ok-soft:rgba(14,124,66,.10);
+    --warn:#8A5D0F; --warn-soft:rgba(138,93,15,.11);
+    --err:#B93124; --err-soft:rgba(185,49,36,.10);
+    --scheme:light;
+  }
+  [data-theme] { color-scheme: var(--scheme); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%,100% { opacity:.35 } 50% { opacity:1 } }
+  ::selection { background:rgba(91,147,255,.3); }
+</style>
+</helmet>
+<div data-theme="{{ theme }}" style="min-height:100vh;background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans',system-ui,sans-serif;padding:28px 24px 56px">
+
+  <div style="max-width:1240px;margin:0 auto;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--surface);color:var(--ink);box-shadow:0 24px 60px -20px rgba(0,0,0,.45)">
+
+    <div style="display:flex;align-items:center;gap:14px;height:46px;padding:0 16px;background:var(--surface-2);border-bottom:1px solid var(--line)">
+      <div style="display:flex;gap:7px">
+        <div style="width:11px;height:11px;border-radius:50%;background:#E9695F"></div>
+        <div style="width:11px;height:11px;border-radius:50%;background:#E0B240"></div>
+        <div style="width:11px;height:11px;border-radius:50%;background:#54B963"></div>
+      </div>
+      <div style="font-size:12.5px;font-weight:600;color:var(--muted)">CIC — Text &amp; TUDF Converter</div>
+      <div style="flex:1"></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 10px;border-radius:999px;background:var(--ok-soft);color:var(--ok);font-size:11px;font-weight:600;letter-spacing:.02em">
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--ok)"></span>Offline · on-device
+      </div>
+      <div style="width:1px;height:18px;background:var(--line)"></div>
+      <div style="font-size:12px;color:var(--muted);font-weight:500">finguru-08</div>
+      <div onClick="{{ toggleTheme }}" title="Toggle theme" style="display:flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--line);border-radius:7px;color:var(--muted);cursor:pointer;font-size:12px" style-hover="border-color:var(--accent);color:var(--accent)">{{ themeIcon }}</div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:18px;padding:14px 22px;border-bottom:1px solid var(--line)">
+      <div style="display:flex;padding:3px;gap:3px;background:var(--field);border:1px solid var(--line);border-radius:9px">
+        <sc-for list="{{ modes }}" as="m" hint-placeholder-count="2">
+          <div onClick="{{ m.onClick }}" style="{{ m.style }}">{{ m.label }}</div>
+        </sc-for>
+      </div>
+      <div style="flex:1;font-size:12.5px;color:var(--muted);max-width:520px;line-height:1.5">{{ modeBlurb }}</div>
+      <div style="display:flex;align-items:center;gap:14px;font-size:11.5px;color:var(--faint)">
+        <span style="font-family:'IBM Plex Mono',monospace">v2.4.1</span>
+        <a href="#signout" onClick="{{ noop }}">Sign out</a>
+      </div>
+    </div>
+
+    <sc-if value="{{ isApp }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;align-items:stretch;min-height:600px">
+
+        <div style="flex:1;padding:24px 26px 30px;display:flex;flex-direction:column;gap:26px;min-width:0">
+
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;align-items:baseline;gap:10px">
+              <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)">Submission</div>
+              <div style="flex:1;height:1px;background:var(--line-soft)"></div>
+            </div>
+
+            <div>
+              <div style="font-size:12.5px;font-weight:600;margin-bottom:7px;color:var(--ink)">Bureau format / portal <span style="color:var(--faint);font-weight:400">— which submission you are filing</span></div>
+              <select onChange="{{ onFormat }}" style="width:100%;padding:10px 12px;background:var(--field);border:1px solid var(--line);border-radius:8px;color:var(--ink);font:inherit;font-size:13.5px">
+                <sc-for list="{{ formats }}" as="f" hint-placeholder-count="4">
+                  <option value="{{ f.id }}">{{ f.label }}</option>
+                </sc-for>
+              </select>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div>
+                <div style="font-size:12.5px;font-weight:600;margin-bottom:7px;color:var(--ink)">Member / MFI / NBF ID</div>
+                <input type="text" value="{{ memberId }}" onChange="{{ onMemberId }}" style="width:100%;padding:10px 12px;background:var(--field);border:1px solid var(--line);border-radius:8px;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:13.5px;letter-spacing:.02em" />
+              </div>
+              <div>
+                <div style="font-size:12.5px;font-weight:600;margin-bottom:7px;color:var(--ink)">Member name <span style="color:var(--faint);font-weight:400">(MFI)</span></div>
+                <input type="text" value="{{ memberName }}" onChange="{{ onMemberName }}" style="width:100%;padding:10px 12px;background:var(--field);border:1px solid var(--line);border-radius:8px;color:var(--ink);font:inherit;font-size:13.5px" />
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+              <div>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
+                  <div style="font-size:12.5px;font-weight:600;color:var(--ink)">Reporting / cycle date</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;padding:2px 7px;border-radius:5px;background:var(--accent-soft);color:var(--accent)">{{ reportingDate }}</div>
+                </div>
+                <input type="month" value="{{ month }}" onChange="{{ onMonth }}" style="width:100%;padding:10px 12px;background:var(--field);border:1px solid var(--line);border-radius:8px;color:var(--ink);font:inherit;font-size:13.5px" />
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px">
+                  <sc-for list="{{ cycles }}" as="c" hint-placeholder-count="4">
+                    <div onClick="{{ c.onClick }}" style="{{ c.style }}">
+                      <div style="{{ c.dayStyle }}">{{ c.day }}</div>
+                      <div style="{{ c.tagStyle }}">{{ c.tag }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+              <div>
+                <div style="font-size:12.5px;font-weight:600;margin-bottom:7px;color:var(--ink)">Creation date <span style="color:var(--faint);font-weight:400">DD/MM/YYYY</span></div>
+                <div style="position:relative">
+                  <input type="text" value="{{ creationDate }}" onChange="{{ onCreation }}" style="width:100%;padding:10px 38px 10px 12px;background:var(--field);border:1px solid var(--line);border-radius:8px;color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:13.5px" />
+                  <div style="position:absolute;top:50%;right:6px;transform:translateY(-50%);display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;color:var(--muted);cursor:pointer;font-size:13px" style-hover="color:var(--accent);background:var(--accent-soft)">▤</div>
+                </div>
+                <div style="margin-top:9px;font-size:11.5px;line-height:1.55;color:var(--faint)">Flat-sheet formats may leave the ID and dates blank — values in the sheet's header cells override these.</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;align-items:baseline;gap:10px">
+              <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)">Input</div>
+              <div style="flex:1;height:1px;background:var(--line-soft)"></div>
+              <div style="display:flex;padding:2px;gap:2px;background:var(--field);border:1px solid var(--line);border-radius:7px">
+                <sc-for list="{{ sources }}" as="s" hint-placeholder-count="2">
+                  <div onClick="{{ s.onClick }}" style="{{ s.style }}">{{ s.label }}</div>
+                </sc-for>
+              </div>
+            </div>
+
+            <sc-if value="{{ noFile }}" hint-placeholder-val="{{ true }}">
+              <div onClick="{{ pickFile }}" style="border:1.5px dashed var(--line);border-radius:10px;padding:30px;text-align:center;cursor:pointer;display:flex;flex-direction:column;gap:6px;align-items:center" style-hover="border-color:var(--accent);background:var(--accent-soft)">
+                <div style="font-size:14px;font-weight:600;color:var(--ink)">Choose an <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;background:var(--surface-2);padding:2px 6px;border-radius:4px">.xlsx</span> file</div>
+                <div style="font-size:12px;color:var(--muted)">click to browse, or drop a file here</div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ hasFile }}" hint-placeholder-val="{{ false }}">
+              <div style="border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;align-items:center;gap:14px;background:var(--surface-2)">
+                <div style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;background:var(--ok-soft);color:var(--ok);font-size:11px;font-weight:700;font-family:'IBM Plex Mono',monospace">XLS</div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Master_Sheet_Jul2026_W3.xlsx</div>
+                  <div style="font-size:11.5px;color:var(--muted);margin-top:2px;font-family:'IBM Plex Mono',monospace">Master Sheet · 1,284 rows · 2.1 MB</div>
+                </div>
+                <div onClick="{{ clearFile }}" style="font-size:12px;font-weight:600;color:var(--accent);cursor:pointer;padding:6px 10px;border-radius:7px" style-hover="background:var(--accent-soft)">Replace</div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ isValidate }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:10px;padding-top:4px">
+                <div style="font-size:12.5px;font-weight:600;color:var(--ink)">Reference output file <span style="color:var(--faint);font-weight:400">— .txt / .CDF / .tudf to compare byte-for-byte</span></div>
+                <div onClick="{{ pickRef }}" style="border:1.5px dashed var(--line);border-radius:10px;padding:18px;text-align:center;cursor:pointer;font-size:12.5px;color:var(--muted)" style-hover="border-color:var(--accent);color:var(--ink)">{{ refLabel }}</div>
+                <div onClick="{{ toggleEol }}" style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:12.5px;color:var(--muted)">
+                  <div style="{{ eolBox }}">✓</div>Ignore line-ending differences (CRLF vs LF)
+                </div>
+              </div>
+            </sc-if>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;align-items:baseline;gap:10px">
+              <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)">Options</div>
+              <div style="flex:1;height:1px;background:var(--line-soft)"></div>
+            </div>
+            <div onClick="{{ toggleReport }}" style="display:flex;align-items:flex-start;gap:12px;cursor:pointer">
+              <div style="{{ reportSwitch }}"><div style="{{ reportKnob }}"></div></div>
+              <div>
+                <div style="font-size:13px;font-weight:500;color:var(--ink)">Also generate the workbook report</div>
+                <div style="font-size:11.5px;color:var(--faint);margin-top:2px">.xlsx with one sheet per segment, sorted as filed</div>
+              </div>
+            </div>
+            <div onClick="{{ toggleBypass }}" style="display:flex;align-items:flex-start;gap:12px;cursor:pointer">
+              <div style="{{ bypassSwitch }}"><div style="{{ bypassKnob }}"></div></div>
+              <div>
+                <div style="font-size:13px;font-weight:500;color:var(--ink)">Bypass validation errors</div>
+                <div style="font-size:11.5px;color:var(--faint);margin-top:2px">Generate anyway — rejection risk. Parse and mapping errors are never bypassed.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="width:372px;flex:none;border-left:1px solid var(--line);background:var(--surface-2);padding:22px 20px;display:flex;flex-direction:column;gap:16px">
+
+          <sc-if value="{{ hasRun }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;padding:3px;gap:3px;background:var(--field);border:1px solid var(--line);border-radius:8px">
+              <sc-for list="{{ railTabs }}" as="t" hint-placeholder-count="2">
+                <div onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.label }}<span style="{{ t.badge }}">{{ t.count }}</span></div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ railGenerate }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:16px;flex:1">
+              <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)">{{ railTitle }}</div>
+              <div style="display:flex;flex-direction:column;gap:2px">
+                <sc-for list="{{ checklist }}" as="c" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--line-soft)">
+                    <div style="{{ c.dot }}">{{ c.mark }}</div>
+                    <div style="{{ c.labelStyle }}">{{ c.label }}</div>
+                    <div style="{{ c.valStyle }}">{{ c.value }}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <div onClick="{{ generate }}" style="{{ goStyle }}">{{ goLabel }}</div>
+              <div style="font-size:11.5px;color:var(--faint);line-height:1.55;margin-top:-8px">{{ goHint }}</div>
+              <div style="flex:1"></div>
+              <sc-if value="{{ showRecent }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex;flex-direction:column;gap:9px">
+                  <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)">Recent runs</div>
+                  <sc-for list="{{ recent }}" as="r" hint-placeholder-count="2">
+                    <div style="display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--surface);cursor:pointer" style-hover="border-color:var(--accent)">
+                      <div style="{{ r.dot }}"></div>
+                      <div style="flex:1;min-width:0">
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</div>
+                        <div style="font-size:11px;color:var(--faint);margin-top:2px">{{ r.meta }}</div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isRunning }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:16px;flex:1">
+              <div style="display:flex;align-items:center;gap:10px">
+                <div style="width:14px;height:14px;border-radius:50%;border:2px solid var(--accent-soft);border-top-color:var(--accent);animation:spin .7s linear infinite"></div>
+                <div style="font-size:12.5px;font-weight:600;color:var(--ink)">{{ runningTitle }}</div>
+              </div>
+              <div style="height:3px;border-radius:2px;background:var(--line);overflow:hidden">
+                <div style="{{ progressStyle }}"></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:1px">
+                <sc-for list="{{ steps }}" as="s" hint-placeholder-count="5">
+                  <div style="display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--line-soft)">
+                    <div style="{{ s.dot }}">{{ s.mark }}</div>
+                    <div style="{{ s.labelStyle }}">{{ s.label }}</div>
+                    <div style="flex:1"></div>
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--faint)">{{ s.detail }}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <div onClick="{{ cancel }}" style="align-self:flex-start;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface)" style-hover="border-color:var(--err);color:var(--err)">Cancel</div>
+              <div style="flex:1"></div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ railResults }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:14px;flex:1">
+              <div style="{{ outcomePill }}">{{ outcomeLabel }}</div>
+              <div style="font-size:12.5px;color:var(--muted);line-height:1.55;margin-top:-4px">{{ outcomeNote }}</div>
+
+              <sc-if value="{{ hasIssues }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex;flex-direction:column;gap:7px">
+                  <sc-for list="{{ railIssues }}" as="g" hint-placeholder-count="4">
+                    <div onClick="{{ g.onOpen }}" style="display:flex;align-items:flex-start;gap:10px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface);cursor:pointer" style-hover="border-color:var(--accent)">
+                      <div style="{{ g.sev }}">{{ g.sevLabel }}</div>
+                      <div style="flex:1;min-width:0">
+                        <div style="font-size:12.5px;font-weight:600;line-height:1.4;color:var(--ink)">{{ g.title }}</div>
+                        <div style="font-size:11px;color:var(--faint);margin-top:3px;font-family:'IBM Plex Mono',monospace">{{ g.where }}</div>
+                      </div>
+                      <div style="font-size:11.5px;font-weight:600;color:var(--muted);font-family:'IBM Plex Mono',monospace;white-space:nowrap">{{ g.count }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ isClean }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <div style="border:1px solid var(--line);border-radius:10px;padding:13px;background:var(--surface);display:flex;align-items:center;gap:10px">
+                    <div style="{{ fileIcon }}">TXT</div>
+                    <div style="flex:1;min-width:0">
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;line-height:1.5;word-break:break-all;color:var(--ink)">{{ outName }}</div>
+                      <div style="font-size:11px;color:var(--faint);margin-top:3px">{{ outMeta }}</div>
+                    </div>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <sc-for list="{{ counts }}" as="c" hint-placeholder-count="4">
+                      <div style="border:1px solid var(--line);border-radius:9px;padding:11px 12px;background:var(--surface)">
+                        <div style="font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;color:var(--ink)">{{ c.n }}</div>
+                        <div style="font-size:11px;color:var(--muted);margin-top:2px">{{ c.label }}</div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-if>
+
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <sc-for list="{{ actions }}" as="a" hint-placeholder-count="3">
+                  <div onClick="{{ a.onClick }}" style="{{ a.style }}">{{ a.label }}</div>
+                </sc-for>
+              </div>
+
+              <div style="flex:1"></div>
+              <div style="font-size:11.5px;color:var(--faint);line-height:1.6">{{ railFoot }}</div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isReport }}" hint-placeholder-val="{{ false }}">
+      <div style="min-height:600px">
+        <div style="display:flex;align-items:center;gap:16px;padding:18px 22px;border-bottom:1px solid var(--line);background:var(--surface-2)">
+          <div onClick="{{ back }}" style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;padding:7px 11px;border:1px solid var(--line);border-radius:8px;background:var(--surface)" style-hover="border-color:var(--accent);color:var(--accent)">← Back to setup</div>
+          <div style="{{ outcomePill }}">{{ outcomeLabel }}</div>
+          <div style="flex:1;font-size:12.5px;color:var(--muted)">{{ outcomeNote }}</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--faint)">{{ runStamp }}</div>
+        </div>
+
+        <div style="display:flex;align-items:stretch;min-height:540px">
+          <div style="flex:1;padding:24px 26px 30px;min-width:0;display:flex;flex-direction:column;gap:20px">
+
+            <sc-if value="{{ hasIssues }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:14px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)">Findings</div>
+                  <div style="flex:1;height:1px;background:var(--line-soft)"></div>
+                  <sc-for list="{{ filters }}" as="f" hint-placeholder-count="3">
+                    <div onClick="{{ f.onClick }}" style="{{ f.style }}">{{ f.label }}</div>
+                  </sc-for>
+                </div>
+
+                <sc-for list="{{ visibleIssues }}" as="g" hint-placeholder-count="3">
+                  <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface-2)">
+                    <div onClick="{{ g.onToggle }}" style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;cursor:pointer">
+                      <div style="{{ g.sev }}">{{ g.sevLabel }}</div>
+                      <div style="flex:1;min-width:0">
+                        <div style="font-size:13.5px;font-weight:600;line-height:1.45;color:var(--ink)">{{ g.title }}</div>
+                        <div style="font-size:11.5px;color:var(--muted);margin-top:4px;font-family:'IBM Plex Mono',monospace">{{ g.where }}</div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:12px">
+                        <div style="font-size:11.5px;font-weight:600;color:var(--muted);font-family:'IBM Plex Mono',monospace">{{ g.count }}</div>
+                        <div style="font-size:11px;color:var(--faint)">{{ g.chevron }}</div>
+                      </div>
+                    </div>
+                    <sc-if value="{{ g.open }}" hint-placeholder-val="{{ false }}">
+                      <div style="padding:0 16px 16px;display:flex;flex-direction:column;gap:12px">
+                        <div style="font-size:12.5px;color:var(--muted);line-height:1.6;border-top:1px solid var(--line-soft);padding-top:12px">{{ g.fix }}</div>
+                        <div style="border:1px solid var(--line-soft);border-radius:8px;overflow:hidden">
+                          <div style="display:grid;grid-template-columns:74px 62px 1fr;padding:8px 12px;background:var(--field);font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)">
+                            <div>Row</div><div>Cell</div><div>Value read</div>
+                          </div>
+                          <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="3">
+                            <div style="display:grid;grid-template-columns:74px 62px 1fr;padding:8px 12px;border-top:1px solid var(--line-soft);font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:var(--surface)">
+                              <div style="color:var(--muted)">{{ r.row }}</div>
+                              <div style="color:var(--accent)">{{ r.cell }}</div>
+                              <div style="color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.value }}</div>
+                            </div>
+                          </sc-for>
+                          <sc-if value="{{ g.more }}" hint-placeholder-val="{{ false }}">
+                            <div style="padding:8px 12px;border-top:1px solid var(--line-soft);font-size:11.5px;color:var(--faint);background:var(--surface)">{{ g.moreLabel }}</div>
+                          </sc-if>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--faint)">
+                          <span style="font-weight:600;color:var(--muted)">Rule</span>{{ g.reference }}
+                        </div>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ isClean }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:14px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)">File contents</div>
+                  <div style="flex:1;height:1px;background:var(--line-soft)"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+                  <sc-for list="{{ counts }}" as="c" hint-placeholder-count="4">
+                    <div style="border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--surface-2)">
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:21px;font-weight:600;color:var(--ink)">{{ c.n }}</div>
+                      <div style="font-size:11.5px;color:var(--muted);margin-top:4px">{{ c.label }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">
+                  <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--field);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)">First records <span style="flex:1"></span><span style="text-transform:none;letter-spacing:0;font-weight:500">ASCII · CRLF</span></div>
+                  <div style="padding:12px 14px;font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.75;color:var(--muted);overflow:hidden;white-space:pre;background:var(--surface-2)">{{ preview }}</div>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+
+          <div style="width:336px;flex:none;border-left:1px solid var(--line);background:var(--surface-2);padding:24px 22px;display:flex;flex-direction:column;gap:16px">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)">Output</div>
+
+            <div style="border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--surface)">
+              <div style="display:flex;align-items:center;gap:10px">
+                <div style="{{ fileIcon }}">TXT</div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;line-height:1.5;word-break:break-all;color:var(--ink)">{{ outName }}</div>
+                  <div style="font-size:11px;color:var(--faint);margin-top:3px">{{ outMeta }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:9px">
+              <sc-for list="{{ actions }}" as="a" hint-placeholder-count="3">
+                <div onClick="{{ a.onClick }}" style="{{ a.style }}">{{ a.label }}</div>
+              </sc-for>
+            </div>
+
+            <div style="height:1px;background:var(--line)"></div>
+
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <sc-for list="{{ runFacts }}" as="f" hint-placeholder-count="4">
+                <div style="display:flex;align-items:baseline;gap:10px;font-size:12px">
+                  <div style="color:var(--faint);width:96px;flex:none">{{ f.k }}</div>
+                  <div style="flex:1;font-weight:500;font-family:'IBM Plex Mono',monospace;font-size:11.5px;word-break:break-all;color:var(--ink)">{{ f.v }}</div>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="flex:1"></div>
+            <div style="font-size:11.5px;color:var(--faint);line-height:1.6">{{ railFoot }}</div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+
+  <div style="max-width:1240px;margin:14px auto 0;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--faint);font-family:'IBM Plex Mono',monospace">{{ statusLine }}</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;startTheme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;'dark'|'light'&quot;},&quot;showRecent&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = {
+    theme: null, mode: 'convert', view: 'app', rail: 'generate', status: 'idle', step: 0,
+    source: 'file', file: false, ref: false, eol: true,
+    report: false, bypass: false, fixed: false,
+    cycle: 'W3', month: '2026-07', format: 'commercial-ucrf-flat-v310',
+    memberId: 'NBFC00000101', memberName: 'CheFair', creation: '17/07/2026',
+    filter: 'all', open: { state: true }, outcome: null
+  };
+
+  componentWillUnmount() { clearInterval(this._t); }
+
+  get theme() { return this.state.theme ?? (this.props.startTheme ?? 'dark'); }
+
+  chip(active) {
+    return 'padding:8px 20px;border-radius:7px;font-size:12.5px;font-weight:600;cursor:pointer;transition:.12s;' +
+      (active ? 'background:var(--accent);color:#fff' : 'color:var(--muted);background:transparent');
+  }
+  smallChip(active) {
+    return 'padding:5px 11px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;' +
+      (active ? 'background:var(--accent-soft);color:var(--accent)' : 'color:var(--muted)');
+  }
+  sw(on) {
+    return 'width:34px;height:20px;flex:none;border-radius:999px;padding:2px;margin-top:1px;display:flex;transition:.15s;' +
+      (on ? 'background:var(--accent);justify-content:flex-end' : 'background:var(--line);justify-content:flex-start');
+  }
+  knob() { return 'width:16px;height:16px;border-radius:50%;background:#fff'; }
+
+  run() {
+    clearInterval(this._t);
+    this.setState({ status: 'running', step: 0, rail: 'generate', view: 'app' });
+    this._t = setInterval(() => {
+      const n = this.state.step + 1;
+      if (n >= 5) {
+        clearInterval(this._t);
+        const ok = this.state.fixed || this.state.bypass;
+        this.setState({
+          status: 'done', step: 5, rail: 'results',
+          outcome: ok ? (this.state.bypass && !this.state.fixed ? 'bypassed' : 'success') : 'errors'
+        });
+      } else this.setState({ step: n });
+    }, 620);
+  }
+
+  issueData() {
+    return [
+      { id: 'state', sev: 'error', title: 'State / Union Territory code not recognised', where: 'AS · stateCode · enum', count: 7,
+        fix: 'The address column holds a state name, not a CRIF numeric code. Replace with the catalogue code — Maharashtra is 27.',
+        reference: 'CRIF Commercial UCRF V3.10, Catalogue 8.6 — State/UT codes',
+        rows: [{ row: '112', cell: 'AF112', value: 'Maharashtra ' }, { row: '318', cell: 'AF318', value: 'MAHARASTRA' }, { row: '446', cell: 'AF446', value: 'Karnatak' }], more: true, moreLabel: '4 more rows' },
+      { id: 'ro', sev: 'error', title: 'Borrower has no Registered Office address', where: 'AS · locationType · portal-mandatory', count: 3,
+        fix: 'Every borrower needs at least one address flagged Registered Office. Set Location Type on one address row per borrower.',
+        reference: 'CRIF Commercial UCRF V3.10 §7.3 — Address Segment Rules',
+        rows: [{ row: '204', cell: 'AJ204', value: '(blank)' }, { row: '771', cell: 'AJ771', value: 'Branch' }, { row: '902', cell: 'AJ902', value: '(blank)' }], more: false },
+      { id: 'pin', sev: 'error', title: 'PIN code could not be parsed from the address text', where: 'AS · pinCode · parse · not bypassable', count: 4,
+        fix: 'Emitting this record would drop the PIN silently, so bypass cannot cover it. Add a 6-digit PIN at the end of the address cell.',
+        reference: 'Master Sheet layout — address column AH',
+        rows: [{ row: '58', cell: 'AH58', value: 'Plot 14, MIDC, Pune - 4110' }, { row: '640', cell: 'AH640', value: '2nd Flr, Andheri East' }], more: true, moreLabel: '2 more rows' },
+      { id: 'wilful', sev: 'error', title: 'Wilful Default Date missing while status is set', where: 'CR · wilfulDefaultDate · mandatory', count: 2,
+        fix: 'When Wilful Default Status = Y, the date is mandatory. Fill the date or clear the status flag.',
+        reference: 'CRIF Commercial UCRF V3.10 §7.5, CR fields 35–36',
+        rows: [{ row: '381', cell: 'BR381', value: '(blank)' }, { row: '509', cell: 'BR509', value: '(blank)' }], more: false },
+      { id: 'name', sev: 'warning', title: 'Borrower Name exceeds 100 characters — will be truncated', where: 'BS · borrowerName · length', count: 4,
+        fix: 'The bureau accepts the record but stores the truncated name. Shorten it in the sheet if the full legal name matters.',
+        reference: 'CRIF Commercial UCRF V3.10 §7.2 — Borrower Segment',
+        rows: [{ row: '77', cell: 'C77', value: 'SHREE SIDDHIVINAYAK AGRO PROCESSING AND COLD…' }, { row: '455', cell: 'C455', value: 'NEW BHARAT TRADING COMPANY PRIVATE LIMITED…' }], more: true, moreLabel: '2 more rows' },
+      { id: 'gst', sev: 'warning', title: 'GST number format looks wrong', where: 'BS · gstin · format', count: 2,
+        fix: 'Portal usually accepts a blank GSTIN but rejects a malformed one. Verify the 15-character pattern or clear the cell.',
+        reference: 'CRIF Commercial UCRF V3.10 §7.2 — Borrower Segment',
+        rows: [{ row: '133', cell: 'L133', value: '27AABCU9603R1Z' }, { row: '890', cell: 'L890', value: 'NA' }], more: false }
+    ];
+  }
+
+  openGroup(id) {
+    this.setState(p => ({ view: 'report', filter: 'all', open: Object.assign({}, p.open, { [id]: true }) }));
+  }
+
+  renderVals() {
+    const s = this.state;
+    const light = this.theme === 'light';
+    const cycleMap = { W1: ['9th', '09/07/2026'], W2: ['16th', '16/07/2026'], W3: ['23rd', '23/07/2026'], ME: ['Month-end', '31/07/2026'] };
+
+    const cycles = ['W1', 'W2', 'W3', 'ME'].map(k => {
+      const on = s.cycle === k;
+      return {
+        day: cycleMap[k][0], tag: k, onClick: () => this.setState({ cycle: k }),
+        style: 'display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px;border-radius:8px;cursor:pointer;border:1px solid ' + (on ? 'var(--accent)' : 'var(--line)') + ';background:' + (on ? 'var(--accent-soft)' : 'var(--field)'),
+        dayStyle: 'font-size:12.5px;font-weight:500;color:' + (on ? 'var(--accent)' : 'var(--ink)'),
+        tagStyle: 'font-size:10.5px;font-family:\'IBM Plex Mono\',monospace;color:' + (on ? 'var(--accent)' : 'var(--faint)')
+      };
+    });
+
+    const isValidate = s.mode === 'validate';
+    const all = this.issueData();
+    const errIssues = all.filter(i => i.sev === 'error');
+    const warnIssues = all.filter(i => i.sev === 'warning');
+    const errCount = errIssues.reduce((a, i) => a + i.count, 0);
+    const warnCount = warnIssues.reduce((a, i) => a + i.count, 0);
+
+    const outcome = s.outcome;
+    const clean = outcome === 'success';
+    const showIssues = outcome === 'errors' || outcome === 'bypassed';
+    const done = s.status === 'done';
+
+    const sevStyle = sev => 'flex:none;margin-top:1px;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:.05em;font-family:\'IBM Plex Mono\',monospace;' +
+      (sev === 'error' ? 'background:var(--err-soft);color:var(--err)' : 'background:var(--warn-soft);color:var(--warn)');
+
+    const list = (s.filter === 'errors' ? errIssues : s.filter === 'warnings' ? warnIssues : all);
+    const decorate = g => ({
+      sevLabel: g.sev === 'error' ? 'ERROR' : 'WARN', sev: sevStyle(g.sev),
+      count: g.count + (g.count === 1 ? ' row' : ' rows')
+    });
+    const visibleIssues = list.map(g => Object.assign({}, g, decorate(g), {
+      open: !!s.open[g.id],
+      onToggle: () => this.setState(p => ({ open: Object.assign({}, p.open, { [g.id]: !p.open[g.id] }) })),
+      chevron: s.open[g.id] ? '▲' : '▼'
+    }));
+    const railIssues = all.map(g => Object.assign({}, g, decorate(g), { onOpen: () => this.openGroup(g.id) }));
+
+    const steps = ['Reading workbook', 'Mapping rows to segments', 'Validating against spec', 'Encoding records', 'Writing output file']
+      .map((label, i) => {
+        const d = i < s.step, now = i === s.step;
+        return {
+          label, mark: d ? '✓' : '',
+          detail: d ? (['1,284 rows', '6,142 segments', errCount + ' errors', 'ASCII', 'done'][i]) : now ? 'working…' : '',
+          dot: 'display:flex;align-items:center;justify-content:center;width:18px;height:18px;flex:none;border-radius:50%;font-size:10px;font-weight:700;' +
+            (d ? 'background:var(--ok-soft);color:var(--ok)' : now ? 'background:var(--accent-soft);color:var(--accent);animation:pulse 1.1s ease-in-out infinite' : 'background:var(--line-soft);color:var(--faint)'),
+          labelStyle: 'font-size:12.5px;font-weight:500;color:' + (d || now ? 'var(--ink)' : 'var(--faint)')
+        };
+      });
+
+    const ready = s.file;
+    const checkRows = [
+      { label: 'Bureau format', ok: true, value: 'UCRF V3.10' },
+      { label: 'Member ID', ok: !!s.memberId, value: s.memberId },
+      { label: 'Cycle', ok: true, value: cycleMap[s.cycle][1] + ' · ' + s.cycle },
+      { label: 'Input workbook', ok: !!s.file, value: s.file ? '1,284 rows' : 'not chosen' }
+    ];
+    if (isValidate) checkRows.push({ label: 'Reference file', ok: !!s.ref, value: s.ref ? 'NBF…W3.txt' : 'optional' });
+    const checklist = checkRows.map(c => ({
+      label: c.label, mark: c.ok ? '✓' : '·', value: c.value,
+      labelStyle: 'flex:1;font-size:12.5px;font-weight:500;color:var(--ink)',
+      dot: 'display:flex;align-items:center;justify-content:center;width:17px;height:17px;flex:none;border-radius:50%;font-size:10px;font-weight:700;' +
+        (c.ok ? 'background:var(--ok-soft);color:var(--ok)' : 'background:var(--line-soft);color:var(--faint)'),
+      valStyle: 'font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:' + (c.ok ? 'var(--muted)' : 'var(--faint)')
+    }));
+
+    const inReport = s.view === 'report';
+    const actionDefs = showIssues && outcome === 'errors'
+      ? [].concat(
+          inReport ? [] : [['Open full findings', true, () => this.setState({ view: 'report', filter: 'all' })]],
+          [['Export findings (.xlsx)', inReport, () => {}],
+           ['Mark cells fixed, re-run', false, () => this.setState({ fixed: true }, () => this.run())]])
+      : [].concat(
+          [['Save submission file…', true, () => {}]],
+          inReport ? [] : [['Open full report', false, () => this.setState({ view: 'report' })]],
+          [[s.report ? 'Save workbook report (.xlsx)' : 'Reveal in folder', false, () => {}]]);
+    const actions = actionDefs.map(([label, primary, onClick]) => ({
+      label, onClick,
+      style: 'text-align:center;padding:11px;border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;' +
+        (primary ? 'background:var(--accent);color:#fff' : 'border:1px solid var(--line);background:var(--surface);color:var(--ink)')
+    }));
+
+    const pillStyle = (bg, fg) => 'align-self:flex-start;padding:5px 11px;border-radius:6px;font-size:11px;font-weight:700;letter-spacing:.05em;font-family:\'IBM Plex Mono\',monospace;background:' + bg + ';color:' + fg;
+    let outcomePill = pillStyle('var(--ok-soft)', 'var(--ok)'), outcomeLabel = 'GENERATED';
+    let outcomeNote = warnCount + ' warnings reviewed · file written to disk.';
+    if (outcome === 'errors') {
+      outcomePill = pillStyle('var(--err-soft)', 'var(--err)');
+      outcomeLabel = errCount + ' BLOCKING ERRORS';
+      outcomeNote = 'No file written. ' + errIssues.length + ' rules failed across ' + errCount + ' rows, plus ' + warnCount + ' warnings. Fix the cells, then re-run.';
+    }
+    if (outcome === 'bypassed') {
+      outcomePill = pillStyle('var(--warn-soft)', 'var(--warn)');
+      outcomeLabel = 'GENERATED WITH BYPASS';
+      outcomeNote = errCount + ' errors carried into the file — rejection risk on submission.';
+    }
+
+    const railTabCount = outcome === 'errors' ? errCount : outcome === 'bypassed' ? errCount + warnCount : warnCount;
+
+    return {
+      theme: this.theme,
+      themeIcon: light ? '☾' : '☀',
+      toggleTheme: () => this.setState({ theme: light ? 'dark' : 'light' }),
+      noop: e => e.preventDefault(),
+
+      modes: [['convert', 'Convert'], ['validate', 'Validator']].map(([k, label]) => ({
+        label, style: this.chip(s.mode === k),
+        onClick: () => this.setState({ mode: k, status: 'idle', outcome: null, rail: 'generate', view: 'app' })
+      })),
+      modeBlurb: isValidate
+        ? 'Re-generates from your input workbook and compares it byte-for-byte against a filed submission or CRIF reference file.'
+        : 'Convert customer data in Excel into CRIF Highmark bureau submission files. Nothing leaves this machine.',
+
+      formats: [
+        { id: 'commercial-ucrf-flat-v310', label: 'Commercial UCRF V3.10' },
+        { id: 'commercial-ucrf-flat', label: 'Commercial UCRF V3.9 (deprecated)' },
+        { id: 'consumer-ucrf12-flat', label: 'Consumer UCRF-12' },
+        { id: 'consumer-tudf', label: 'Consumer TUDF Format' },
+        { id: 'mfi-cdf', label: 'MFI CDF V2.0' }
+      ],
+      onFormat: e => this.setState({ format: e.target.value }),
+      memberId: s.memberId, onMemberId: e => this.setState({ memberId: e.target.value }),
+      memberName: s.memberName, onMemberName: e => this.setState({ memberName: e.target.value }),
+      creationDate: s.creation, onCreation: e => this.setState({ creation: e.target.value }),
+      month: s.month, onMonth: e => this.setState({ month: e.target.value }),
+      reportingDate: cycleMap[s.cycle][1], cycles,
+
+      sources: [['file', 'Pick a file'], ['folder', 'From a folder']].map(([k, label]) => ({
+        label, style: this.smallChip(s.source === k), onClick: () => this.setState({ source: k })
+      })),
+      noFile: !s.file, hasFile: !!s.file,
+      pickFile: () => this.setState({ file: true }),
+      clearFile: () => this.setState({ file: false, status: 'idle', outcome: null, rail: 'generate' }),
+      isValidate,
+      pickRef: () => this.setState({ ref: true }),
+      refLabel: s.ref ? 'NBF0001828_23072026_17072026_W3.txt — replace' : 'Choose the reference output file (optional)',
+      toggleEol: () => this.setState({ eol: !s.eol }),
+      eolBox: 'display:flex;align-items:center;justify-content:center;width:16px;height:16px;flex:none;border-radius:4px;font-size:10px;font-weight:700;border:1px solid ' +
+        (s.eol ? 'var(--accent);background:var(--accent);color:#fff' : 'var(--line);background:var(--field);color:transparent'),
+
+      toggleReport: () => this.setState({ report: !s.report }),
+      reportSwitch: this.sw(s.report), reportKnob: this.knob(),
+      toggleBypass: () => this.setState({ bypass: !s.bypass }),
+      bypassSwitch: this.sw(s.bypass), bypassKnob: this.knob(),
+
+      isApp: s.view === 'app', isReport: s.view === 'report',
+      hasRun: done,
+      railTabs: [['generate', isValidate ? 'Validate' : 'Generate', ''], ['results', outcome === 'errors' ? 'Findings' : 'Result', String(railTabCount)]].map(([k, label, count]) => ({
+        label, count,
+        onClick: () => this.setState({ rail: k }),
+        style: 'flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:8px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;' +
+          (s.rail === k ? 'background:var(--accent);color:#fff' : 'color:var(--muted)'),
+        badge: count ? ('padding:1px 6px;border-radius:999px;font-size:10.5px;font-family:\'IBM Plex Mono\',monospace;' +
+          (s.rail === k ? 'background:rgba(255,255,255,.22);color:#fff'
+            : outcome === 'errors' ? 'background:var(--err-soft);color:var(--err)' : 'background:var(--warn-soft);color:var(--warn)')) : 'display:none'
+      })),
+      railGenerate: s.status !== 'running' && (s.rail === 'generate' || !done),
+      isRunning: s.status === 'running',
+      railResults: done && s.rail === 'results',
+
+      railTitle: isValidate ? 'Validate' : 'Generate',
+      checklist,
+      generate: () => { if (ready) this.run(); },
+      goLabel: isValidate ? 'Validate and compare' : 'Generate submission file',
+      goStyle: 'text-align:center;padding:13px;border-radius:10px;font-size:13.5px;font-weight:700;transition:.12s;' +
+        (ready ? 'background:var(--accent);color:#fff;cursor:pointer;box-shadow:0 6px 18px -8px var(--accent)' : 'background:var(--line-soft);color:var(--faint);cursor:not-allowed'),
+      goHint: ready
+        ? (s.bypass ? 'Bypass is on — errors will not stop the file being written.' : 'Runs on this machine. Findings appear before anything is written to disk.')
+        : 'Choose an .xlsx input file to enable this.',
+      showRecent: this.props.showRecent ?? true,
+      recent: [
+        { name: 'NBFC00000101_16072026_10072026_W2.txt', meta: '1,240 borrowers · clean · 6 days ago', dot: 'width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok)' },
+        { name: 'NBFC00000101_09072026_03072026_W1.txt', meta: '1,231 borrowers · 2 warnings · 13 days ago', dot: 'width:7px;height:7px;border-radius:50%;flex:none;background:var(--warn)' }
+      ],
+
+      runningTitle: isValidate ? 'Validating and comparing…' : 'Generating submission file…',
+      steps,
+      progressStyle: 'height:100%;background:var(--accent);border-radius:2px;transition:width .5s ease;width:' + (s.step / 5 * 100) + '%',
+      cancel: () => { clearInterval(this._t); this.setState({ status: 'idle', step: 0 }); },
+
+      back: () => this.setState({ view: 'app' }),
+      outcomePill, outcomeLabel, outcomeNote,
+      runStamp: '02/09/2026 12:41 · 3.2s',
+      hasIssues: showIssues, isClean: clean,
+      filters: [['all', 'All ' + (errCount + warnCount)], ['errors', 'Errors ' + errCount], ['warnings', 'Warnings ' + warnCount]].map(([k, label]) => ({
+        label, style: this.smallChip(s.filter === k), onClick: () => this.setState({ filter: k })
+      })),
+      visibleIssues, railIssues,
+      counts: [{ n: '1,284', label: 'Borrowers' }, { n: '1,507', label: 'Credit facilities' }, { n: '1,349', label: 'Addresses' }, { n: '6,142', label: 'Segments' }],
+      preview: 'HD|NBFC00000101|23072026|17072026|W3|CheFair\nBS|1|SHREE BALAJI TRADERS|AAACS1234F|27AABCU9603R1ZM|…\nAS|1|1|PLOT 14 MIDC PHASE II|PUNE|27|411019|02\nCR|1|1|LOAN AGAINST PROPERTY|10|31032026|4500000|…\nTS|1284|1507|1349|6142',
+      fileIcon: 'display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex:none;border-radius:8px;font-size:10px;font-weight:700;font-family:\'IBM Plex Mono\',monospace;' +
+        (outcome === 'errors' ? 'background:var(--err-soft);color:var(--err)' : 'background:var(--ok-soft);color:var(--ok)'),
+      outName: outcome === 'errors' ? 'nothing written' : 'NBFC00000101_23072026_17072026_W3.txt',
+      outMeta: outcome === 'errors' ? 'Fix the blocking findings, then re-run' : '412 KB · ASCII · CRLF · ' + (s.report ? '+ workbook report' : 'no workbook report'),
+      actions,
+      runFacts: [
+        { k: 'Format', v: 'Commercial UCRF V3.10' },
+        { k: 'Member', v: s.memberId + ' · ' + s.memberName },
+        { k: 'Cycle', v: cycleMap[s.cycle][1] + ' (' + s.cycle + ')' },
+        { k: 'Created', v: s.creation },
+        { k: 'Bypass', v: s.bypass ? 'ON' : 'off' }
+      ],
+      railFoot: showIssues
+        ? 'Findings are keyed to the exact sheet cell. Export them and hand the file back to whoever owns the Master Sheet.'
+        : 'The file is written only after validation passes, so what you save is what the portal will accept.',
+      statusLine: done
+        ? (outcome === 'errors' ? '● ' + errCount + ' errors · ' + warnCount + ' warnings · no file written' : '● file written · ' + warnCount + ' warnings')
+        : s.status === 'running' ? '● working — step ' + (s.step + 1) + ' of 5' : '● idle · on-device · signed in as finguru-08'
+    };
+  }
+}
+</script>
+</body>
+</html>

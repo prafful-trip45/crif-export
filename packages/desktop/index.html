@@ -7,122 +7,172 @@
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
-    <div class="wrap">
-      <header class="apphead">
-        <h1>CIC - Text and TUDF converter</h1>
-        <div class="headright">
-          <span class="badge" id="offlineBadge" title="All processing happens on this machine. Your data never leaves the device.">● Offline · on-device</span>
-          <div class="account hidden" id="account">
-            <span class="account-user" id="accountUser"></span>
-            <button type="button" class="linkbtn" id="logoutBtn" title="Sign out of this device">Sign out</button>
+    <!-- The whole app lives on a "desk" (--bg) with the window frame drawn in-page:
+         the Tauri window itself is undecorated (tauri.conf.json `decorations: false`)
+         so the title bar below is ours, traffic lights included. -->
+    <div class="desk" id="root" data-theme="dark">
+      <div class="frame">
+        <div class="titlebar" data-tauri-drag-region>
+          <div class="lights">
+            <button type="button" class="light light-close" id="winClose" aria-label="Close" title="Close"></button>
+            <button type="button" class="light light-min" id="winMin" aria-label="Minimise" title="Minimise"></button>
+            <button type="button" class="light light-zoom" id="winZoom" aria-label="Zoom" title="Zoom"></button>
+          </div>
+          <div class="titlebar-name" data-tauri-drag-region>CIC — Text &amp; TUDF Converter</div>
+          <div class="grow" data-tauri-drag-region></div>
+          <span class="offline-pill" id="offlineBadge" title="All processing happens on this machine. Your data never leaves the device.">
+            <i aria-hidden="true"></i>Offline · on-device
+          </span>
+          <div class="titlebar-divider" id="accountDivider" hidden></div>
+          <span class="titlebar-user" id="accountUser" hidden></span>
+          <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">☀</button>
+        </div>
+
+        <div class="toolbar">
+          <div class="seg" id="appTabs" role="tablist" aria-label="Mode">
+            <button type="button" class="seg-opt active" role="tab" aria-selected="true" data-app="convert">Convert</button>
+            <button type="button" class="seg-opt" role="tab" aria-selected="false" data-app="validate">Validator</button>
+          </div>
+          <div class="mode-blurb" id="modeBlurb"></div>
+          <div class="toolbar-right">
+            <span class="mono app-version" id="appVersion"></span>
+            <button type="button" class="linkbtn" id="logoutBtn" title="Sign out of this device" hidden>Sign out</button>
           </div>
         </div>
-      </header>
-      <p class="sub">Convert customer data in Excel → CRIF Highmark bureau submission files.</p>
 
-      <div class="tabs apptabs" id="appTabs">
-        <div class="tab active" data-app="convert">Convert</div>
-        <div class="tab" data-app="validate">Validator</div>
+        <!-- ============================ setup view ============================ -->
+        <div class="split" id="appView">
+          <div class="setup">
+            <section class="section">
+              <div class="section-head">
+                <h2>Submission</h2>
+                <div class="rule"></div>
+              </div>
+
+              <div class="field">
+                <label class="flabel" for="format">Bureau format / portal <span class="qual">— which submission you are filing</span></label>
+                <select id="format"></select>
+              </div>
+
+              <div class="grid2">
+                <div class="field">
+                  <label class="flabel" for="memberId">Member / MFI / NBF ID</label>
+                  <input type="text" id="memberId" class="mono idfield" placeholder="NBF1111111" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+                </div>
+                <div class="field">
+                  <label class="flabel" for="memberName">Member name <span class="qual">(MFI)</span></label>
+                  <input type="text" id="memberName" placeholder="ABC Microfinance" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+                </div>
+              </div>
+
+              <div class="grid2 top">
+                <div class="field">
+                  <!-- The reporting date is always one of four fixed cycle points: the 9th (W1),
+                       16th (W2), 23rd (W3), or the last day of the month (ME). Pick a month, then
+                       the cycle point — no free calendar. `reportingDate` holds DD/MM/YYYY and stays
+                       the source of truth for the rest of the app. -->
+                  <div class="label-row">
+                    <label class="flabel" for="reportingMonth">Reporting / cycle date</label>
+                    <span class="chip mono" id="reportingCycleHint"></span>
+                  </div>
+                  <input type="month" id="reportingMonth" aria-label="Reporting month" />
+                  <div class="cycle-seg" id="cycleSeg" role="group" aria-label="Reporting cycle">
+                    <button type="button" class="cycle-opt" data-cycle="W1"><span class="day">9th</span><span class="tag mono">W1</span></button>
+                    <button type="button" class="cycle-opt" data-cycle="W2"><span class="day">16th</span><span class="tag mono">W2</span></button>
+                    <button type="button" class="cycle-opt" data-cycle="W3"><span class="day">23rd</span><span class="tag mono">W3</span></button>
+                    <button type="button" class="cycle-opt" data-cycle="ME"><span class="day">Month-end</span><span class="tag mono">ME</span></button>
+                  </div>
+                  <input type="text" id="reportingDate" hidden autocomplete="off" />
+                </div>
+                <div class="field">
+                  <label class="flabel" for="creationDate">Creation date <span class="qual">DD/MM/YYYY</span></label>
+                  <div class="datefield">
+                    <input type="text" id="creationDate" class="mono" placeholder="30/04/2024" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+                    <button type="button" class="date-btn" id="creationDatePick" aria-label="Pick creation date" title="Pick a date">▤</button>
+                    <input type="date" class="date-native" id="creationDateNative" tabindex="-1" aria-hidden="true" />
+                  </div>
+                  <p class="helper">Flat-sheet formats may leave the ID and dates blank — values in the sheet's header cells override these.</p>
+                </div>
+              </div>
+            </section>
+
+            <section class="section">
+              <div class="section-head">
+                <h2>Input</h2>
+                <div class="rule"></div>
+                <div class="seg seg-sm" id="sourceTabs" role="group" aria-label="Input source">
+                  <button type="button" class="seg-opt active" data-mode="file">Pick a file</button>
+                  <button type="button" class="seg-opt" data-mode="folder">From a folder</button>
+                </div>
+              </div>
+
+              <div id="modeFile">
+                <button type="button" class="dropzone" id="drop">
+                  <span class="dz-title">Choose an <span class="mono kbd">.xlsx</span> file</span>
+                  <span class="dz-sub">click to browse, or drop a file here</span>
+                </button>
+                <div class="filecard hidden" id="fileCard">
+                  <div class="badge-sq ok mono">XLS</div>
+                  <div class="filecard-text">
+                    <div class="filecard-name" id="fileName"></div>
+                    <div class="filecard-meta mono" id="fileMeta"></div>
+                  </div>
+                  <button type="button" class="textbtn" id="fileReplace">Replace</button>
+                </div>
+                <input type="file" id="file" accept=".xlsx" class="hidden" />
+              </div>
+
+              <div id="modeFolder" class="hidden folder-mode">
+                <button class="secondary" id="chooseFolder" type="button">Choose folder…</button>
+                <div class="helper path" id="folderPath">No folder chosen</div>
+                <label class="flabel" for="folderFile">File <span class="qual">(picked from the folder)</span></label>
+                <select id="folderFile"><option value="">— choose a folder above —</option></select>
+              </div>
+
+              <div class="refblock validate-only hidden" id="referenceCard">
+                <div class="flabel">Reference output file <span class="qual">— .txt / .CDF / .tudf to compare byte-for-byte</span></div>
+                <button type="button" class="dropzone dropzone-sm" id="refDrop">Choose the reference output file (optional)</button>
+                <input type="file" id="refFile" class="hidden" />
+                <label class="checkrow">
+                  <input type="checkbox" id="ignoreEol" />
+                  <span class="checkbox" aria-hidden="true">✓</span>
+                  Ignore line-ending differences (CRLF vs LF)
+                </label>
+              </div>
+            </section>
+
+            <section class="section">
+              <div class="section-head">
+                <h2>Options</h2>
+                <div class="rule"></div>
+              </div>
+              <label class="switchrow">
+                <input type="checkbox" id="report" />
+                <span class="switch" aria-hidden="true"><span class="knob"></span></span>
+                <span class="switchrow-text">
+                  <span class="switchrow-title">Also generate the workbook report</span>
+                  <span class="switchrow-desc">.xlsx with one sheet per segment, sorted as filed</span>
+                </span>
+              </label>
+              <label class="switchrow">
+                <input type="checkbox" id="bypassErrors" />
+                <span class="switch" aria-hidden="true"><span class="knob"></span></span>
+                <span class="switchrow-text">
+                  <span class="switchrow-title">Bypass validation errors</span>
+                  <span class="switchrow-desc">Generate anyway — rejection risk. Parse and mapping errors are never bypassed.</span>
+                </span>
+              </label>
+            </section>
+          </div>
+
+          <aside class="rail" id="rail"></aside>
+        </div>
+
+        <!-- ============================ report view ============================ -->
+        <div class="reportview hidden" id="reportView"></div>
       </div>
 
-      <p class="sub validate-only hidden" id="validateIntro">
-        Upload your input <code>.xlsx</code> <strong>and</strong> the output file you already have
-        (a filed submission or a CRIF reference). The app re-generates from the input and
-        <strong>automatically compares</strong> the two — byte for byte — to confirm they match.
-      </p>
-
-      <div class="card">
-        <label>Bureau format / portal <span class="hint">(which submission you are filing)</span></label>
-        <select id="format"></select>
-
-        <div class="row">
-          <div>
-            <label>Member / MFI / NBF ID</label>
-            <input type="text" id="memberId" placeholder="e.g. NBF1111111" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
-          </div>
-          <div>
-            <label>Reporting / cycle date <span class="hint" id="reportingCycleHint"></span></label>
-            <!-- The reporting date is always one of four fixed cycle points: the 9th (W1),
-                 16th (W2), 23rd (W3), or the last day of the month (ME). Pick a month, then
-                 the cycle point — no free calendar. `reportingDate` holds DD/MM/YYYY and stays
-                 the source of truth for the rest of the app. -->
-            <input type="month" id="reportingMonth" class="cycle-month" aria-label="Reporting month" />
-            <div class="cycle-seg" id="cycleSeg" role="group" aria-label="Reporting cycle">
-              <button type="button" class="cycle-opt" data-cycle="W1">9th <span>W1</span></button>
-              <button type="button" class="cycle-opt" data-cycle="W2">16th <span>W2</span></button>
-              <button type="button" class="cycle-opt" data-cycle="W3">23rd <span>W3</span></button>
-              <button type="button" class="cycle-opt" data-cycle="ME">Month-end <span>ME</span></button>
-            </div>
-            <input type="text" id="reportingDate" hidden autocomplete="off" />
-          </div>
-          <div>
-            <label>Creation date <span class="hint">DD/MM/YYYY</span></label>
-            <div class="datefield">
-              <input type="text" id="creationDate" placeholder="30/04/2024" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
-              <button type="button" class="date-btn" id="creationDatePick" aria-label="Pick creation date" title="Pick a date">
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1Zm12 7H5v10h14V9Zm0-2V6H5v1h14Z"/></svg>
-              </button>
-              <input type="date" class="date-native" id="creationDateNative" tabindex="-1" aria-hidden="true" />
-            </div>
-          </div>
-        </div>
-        <div class="row">
-          <div id="memberNameWrap">
-            <label>Member name <span class="hint">(MFI)</span></label>
-            <input type="text" id="memberName" placeholder="ABC Microfinance" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
-          </div>
-        </div>
-        <label class="hint checkline">
-          <input type="checkbox" id="report" />
-          Also generate the multi-sheet workbook report (.xlsx — one sheet per segment + sorting)
-        </label>
-        <label class="hint checkline">
-          <input type="checkbox" id="bypassErrors" />
-          <strong>Bypass validation errors</strong> — generate submission file anyway (rejection risk). Parsing and mapping errors must always be fixed.
-        </label>
-        <p class="hint">For flat-sheet formats you may leave Member&nbsp;ID &amp; dates blank if filled in the sheet's header cells — the sheet overrides these.</p>
-      </div>
-
-      <div class="card">
-        <label>Input source</label>
-        <div class="tabs">
-          <div class="tab active" data-mode="file">Pick a file</div>
-          <div class="tab" data-mode="folder">Pick from a folder</div>
-        </div>
-
-        <div id="modeFile">
-          <div class="drop" id="drop">
-            <strong>Choose an <code>.xlsx</code> file</strong>
-            <span class="hint">click to browse, or drop a file here</span>
-          </div>
-          <input type="file" id="file" accept=".xlsx" class="hidden" />
-        </div>
-
-        <div id="modeFolder" class="hidden">
-          <button class="secondary" id="chooseFolder" type="button">Choose folder…</button>
-          <div class="hint" id="folderPath">No folder chosen</div>
-          <label>File <span class="hint">(picked from the folder)</span></label>
-          <select id="folderFile"><option value="">— choose a folder above —</option></select>
-        </div>
-      </div>
-
-      <div class="card validate-only hidden" id="referenceCard">
-        <label>Reference output file
-          <span class="hint">(optional — drop existing .txt / .CDF / .tudf to run byte-for-byte comparison)</span>
-        </label>
-        <div class="drop" id="refDrop">
-          <strong>Choose the reference output file (optional)</strong>
-          <span class="hint">click to browse, or drop reference file to compare against Master Sheet</span>
-        </div>
-        <input type="file" id="refFile" class="hidden" />
-        <label class="hint checkline">
-          <input type="checkbox" id="ignoreEol" />
-          Ignore line-ending differences (CRLF vs LF) — compare content only
-        </label>
-      </div>
-
-      <button class="go" id="go" disabled>Generate submission file</button>
-      <div class="result" id="result"></div>
+      <div class="statusline mono" id="statusLine"></div>
     </div>
 
     <div id="loginOverlay" class="overlay hidden">

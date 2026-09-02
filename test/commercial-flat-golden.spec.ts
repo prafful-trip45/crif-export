@@ -315,7 +315,9 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
     );
     expect(stateErrors).toHaveLength(2);
     expect(stateErrors.every((issue) => issue.bypassable === false)).toBe(true);
-    expect(stateErrors.every((issue) => issue.reference === 'CRIF Commercial UCRF V3.10 Catalogue 8.6 (State/Union Territory codes)')).toBe(true);
+    // §8.5 is State in V3.10 (8.6 is Type of Relationship), and the citation carries
+    // the printed page so the operator can open the spec at the right place.
+    expect(stateErrors.every((issue) => issue.reference === 'CRIF Commercial UCRF V3.10 §8.5 State, p. 49')).toBe(true);
     expect(result.report.errors.every((issue) => Boolean(issue.reference))).toBe(true);
     expect(result.output).toBeUndefined();
   });

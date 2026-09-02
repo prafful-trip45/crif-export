@@ -7,6 +7,18 @@ import { validate } from '../validation/validator.js';
 import type { ConvertResult } from './result.js';
 import type { FileMeta, FormatSpec } from './types.js';
 
+/**
+ * The stages of a conversion, in the order they run. Front-ends that show live
+ * progress report against these; `done` fires once, after the last stage.
+ */
+export type ConvertPhase =
+  | 'reading'
+  | 'mapping'
+  | 'validating'
+  | 'encoding'
+  | 'writing'
+  | 'done';
+
 export interface ConvertOptions {
   /** Emit the data file even when only warnings (never errors) are present. */
   allowWarnings?: boolean;
@@ -18,6 +30,13 @@ export interface ConvertOptions {
    * via `reportWorkbook`.
    */
   report?: boolean;
+  /**
+   * Called as each stage completes, with whatever detail that stage produced (row
+   * counts, error totals…). Awaited, so a UI callback can yield to the event loop
+   * and actually repaint between stages — the pipeline itself is otherwise a single
+   * synchronous burst. Optional; the CLI/web/worker pass nothing.
+   */
+  onPhase?: (phase: ConvertPhase, detail?: string) => void | Promise<void>;
 }
 
 /**
@@ -31,10 +50,20 @@ export async function convert(
   meta: FileMeta,
   options: ConvertOptions = {},
 ): Promise<ConvertResult> {
+  const phase = async (p: ConvertPhase, detail?: string) => {
+    await options.onPhase?.(p, detail);
+  };
+  const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+
   const rows = await readWorkbook(buffer, format, meta);
+  await phase('reading', plural(rows.length, 'row'));
+
   const borrowers = groupByBorrower(rows);
-  const report = validate(format, borrowers);
   const counts = computeCounts(format, borrowers);
+  await phase('mapping', plural(counts.segmentCount, 'segment'));
+
+  const report = validate(format, borrowers);
+  await phase('validating', plural(report.errors.length, 'error'));
 
   // A parsing failure means the source value could not be translated safely. It
   // must be corrected in the Master Sheet; bypass is only for ordinary bureau
@@ -43,6 +72,7 @@ export async function convert(
     !report.ok &&
     (report.hasNonBypassableErrors || (!options.allowWarnings && !options.bypassErrors))
   ) {
+    await phase('done');
     return { report, counts };
   }
 
@@ -52,7 +82,11 @@ export async function convert(
   const effectiveMeta: FileMeta = { ...meta, ...overrides };
 
   const text = assemble(format, borrowers, effectiveMeta);
+  await phase('encoding', format.fileEncoding.toUpperCase());
+
   const output = toBuffer(format, text);
   const reportWorkbook = options.report ? await writeReport(format, borrowers, effectiveMeta) : undefined;
+  await phase('writing', 'done');
+  await phase('done');
   return { report, output, outputText: text, counts, reportWorkbook };
 }

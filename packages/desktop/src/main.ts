@@ -1,15 +1,26 @@
 /**
  * Desktop UI controller.
  *
- * Mirrors the local web portal's flow, but file selection + saving go through
- * native OS dialogs (Tauri `dialog`/`fs` plugins) instead of a browser path box
- * and a `data:` download. The conversion itself runs in-process via `engine.ts`.
+ * One frame, two panes: the submission setup on the left, a persistent action rail
+ * on the right. Running a conversion swaps the rail's Generate section for live
+ * pipeline steps and then for the run result; a full-width report view holds the
+ * detailed findings tables. The conversion itself runs in-process via `engine.ts`
+ * — nothing leaves the machine.
  *
- * Everything degrades gracefully when opened in a plain browser (`vite dev`
- * without the Tauri shell): the file picker falls back to an <input type=file>
- * and saving falls back to an object-URL download. Folder mode is Tauri-only.
+ * File selection + saving go through native OS dialogs (Tauri `dialog`/`fs`
+ * plugins). Everything degrades gracefully when opened in a plain browser
+ * (`vite dev` without the Tauri shell): the file picker falls back to an
+ * <input type=file> and saving falls back to an object-URL download. Folder mode,
+ * the traffic lights and "Reveal in folder" are Tauri-only.
  */
 import './polyfills'; // MUST be first: sets up Buffer/process before the engine loads.
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/500.css';
+import '@fontsource/ibm-plex-sans/600.css';
+import '@fontsource/ibm-plex-sans/700.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
+import '@fontsource/ibm-plex-mono/600.css';
 import {
   runConvert,
   runValidate,
@@ -19,7 +30,9 @@ import {
   type FormatId,
   type ConvertResult,
   type CompareResult,
+  type ConvertPhase,
 } from './engine';
+import type { ValidationIssue } from '../../core/src/core/result';
 import { getAppVersion } from './app-version';
 import {
   serverConfigured,
@@ -35,22 +48,77 @@ const isTauri = '__TAURI_INTERNALS__' in window;
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 const val = (id: string) => ($(id) as HTMLInputElement | HTMLSelectElement).value;
+const checked = (id: string) => ($(id) as HTMLInputElement).checked;
 
-type Mode = 'file' | 'folder';
-let mode: Mode = 'file';
-
-// 'convert' = generate a bureau file; 'validate' = generate + auto-compare to a
-// supplied output/reference file (the Validator feature).
+// ---- state -----------------------------------------------------------------
+type Theme = 'dark' | 'light';
 type AppMode = 'convert' | 'validate';
+type Source = 'file' | 'folder';
+type View = 'app' | 'report';
+type RailTab = 'generate' | 'results';
+type Status = 'idle' | 'running' | 'done';
+type Outcome = 'errors' | 'bypassed' | 'success';
+type Filter = 'all' | 'errors' | 'warnings';
+
+/** A rule-level grouping of validation issues — the unit the operator acts on. */
+interface Group {
+  id: string;
+  severity: 'error' | 'warning';
+  title: string;
+  where: string;
+  fix: string;
+  reference?: string;
+  rows: Array<{ row: string; cell: string; value: string }>;
+  count: number;
+}
+
+/** Everything a completed run produced, plus the inputs it ran with. */
+interface Run {
+  mode: AppMode;
+  convert: ConvertResult;
+  compare?: CompareResult;
+  outcome: Outcome;
+  groups: Group[];
+  errorRows: number;
+  warningRows: number;
+  fileName: string;
+  formatId: FormatId;
+  formatLabel: string;
+  memberId: string;
+  memberName: string;
+  reportingDate: string;
+  cycle: string;
+  creationDate: string;
+  bypass: boolean;
+  report: boolean;
+  at: Date;
+  durationMs: number;
+}
+
+let theme: Theme = 'dark';
 let appMode: AppMode = 'convert';
+let source: Source = 'file';
+let view: View = 'app';
+let railTab: RailTab = 'generate';
+let status: Status = 'idle';
+let step = 0; // 0..5 while running
+let run: Run | null = null;
+let filter: Filter = 'all';
+let open: Record<string, boolean> = {};
 
 // The selected workbook bytes + display name, regardless of how they were picked.
 let pickedBytes: ArrayBuffer | null = null;
 let pickedName: string | null = null;
+let pickedSize = 0;
+/** Native path when picked through the OS dialog — lets a re-run re-read from disk. */
+let pickedPath: string | null = null;
 let folderPath: string | null = null;
 // The reference output file the user uploads in Validator mode.
 let refBytes: ArrayBuffer | null = null;
 let refName: string | null = null;
+/** Where the submission file was last saved, for "Reveal in folder". */
+let savedPath: string | null = null;
+
 // Set true only when a full-screen gate (login / upgrade) is active.
 let blocked = false;
 // Connectivity is treated as a SOFT gate: instead of a modal, losing the
@@ -59,15 +127,27 @@ let blocked = false;
 // session check the CTAs run.
 let online = true;
 
-// ---- form persistence ------------------------------------------------------
+const STEPS: Array<{ phase: ConvertPhase; label: string }> = [
+  { phase: 'reading', label: 'Reading workbook' },
+  { phase: 'mapping', label: 'Mapping rows to segments' },
+  { phase: 'validating', label: 'Validating against spec' },
+  { phase: 'encoding', label: 'Encoding records' },
+  { phase: 'writing', label: 'Writing output file' },
+];
+let stepDetails: string[] = [];
+
+// ---- persistence -----------------------------------------------------------
 const PERSIST = ['format', 'memberId', 'memberName', 'reportingDate', 'creationDate'];
 const STORE = 'crif-export-desktop-form';
+const THEME_STORE = 'crif-export-desktop-theme';
+const RUNS_STORE = 'crif-export-desktop-runs';
 
 function saveForm() {
   const data: Record<string, unknown> = {};
   PERSIST.forEach((id) => (data[id] = val(id)));
-  data.report = ($('report') as HTMLInputElement).checked;
-  data.mode = mode;
+  data.report = checked('report');
+  data.bypassErrors = checked('bypassErrors');
+  data.source = source;
   try {
     localStorage.setItem(STORE, JSON.stringify(data));
   } catch {
@@ -82,28 +162,39 @@ function loadForm(): Record<string, any> {
   }
 }
 
-// ---- app mode (Convert / Validator) ----------------------------------------
-function setAppMode(m: AppMode) {
-  appMode = m;
-  document.querySelectorAll('#appTabs .tab').forEach((x) =>
-    x.classList.toggle('active', (x as HTMLElement).dataset.app === m),
-  );
-  // Reference card + intro line are visible only in Validator mode.
-  document
-    .querySelectorAll('.validate-only')
-    .forEach((el) => el.classList.toggle('hidden', m !== 'validate'));
-  $('result').innerHTML = '';
-  refreshGo();
+interface RecentRun {
+  name: string;
+  borrowers: number;
+  warnings: number;
+  clean: boolean;
+  at: number;
+}
+function loadRecent(): RecentRun[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(RUNS_STORE) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+function pushRecent(entry: RecentRun) {
+  try {
+    localStorage.setItem(RUNS_STORE, JSON.stringify([entry, ...loadRecent()].slice(0, 10)));
+  } catch {
+    /* ignore */
+  }
 }
 
-// ---- mode tabs -------------------------------------------------------------
-function setMode(m: Mode) {
-  mode = m;
-  document.querySelectorAll('.tab').forEach((x) =>
-    x.classList.toggle('active', (x as HTMLElement).dataset.mode === m),
-  );
-  $('modeFile').classList.toggle('hidden', m !== 'file');
-  $('modeFolder').classList.toggle('hidden', m !== 'folder');
+// ---- theme -----------------------------------------------------------------
+function setTheme(t: Theme) {
+  theme = t;
+  $('root').setAttribute('data-theme', t);
+  $('themeToggle').textContent = t === 'light' ? '☾' : '☀';
+  try {
+    localStorage.setItem(THEME_STORE, t);
+  } catch {
+    /* ignore */
+  }
 }
 
 // ---- init ------------------------------------------------------------------
@@ -113,67 +204,135 @@ function setMode(m: Mode) {
 const HIDDEN_FORMATS = new Set<FormatId>(['commercial-ucrf-flat', 'commercial-ucrf']);
 
 function init() {
+  setTheme((localStorage.getItem(THEME_STORE) as Theme) === 'light' ? 'light' : 'dark');
+
   const formats = listFormats().filter((f) => !HIDDEN_FORMATS.has(f.id));
   ($('format') as HTMLSelectElement).innerHTML = formats
-    .map((f) => `<option value="${f.id}">${f.label}</option>`)
+    .map((f) => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.label)}</option>`)
     .join('');
 
   const saved = loadForm();
   PERSIST.forEach((id) => {
-    if (saved[id] != null && id !== 'format') (($(id) as HTMLInputElement).value = saved[id]);
+    if (saved[id] != null && id !== 'format') ($(id) as HTMLInputElement).value = saved[id];
   });
   // Only restore a saved format if it's still an offered option (a previously-saved
   // hidden/removed format falls back to the first available one).
   if (saved.format && formats.some((f) => f.id === saved.format))
     ($('format') as HTMLSelectElement).value = saved.format;
-  if (saved.report) ($('report') as HTMLInputElement).checked = true;
-  if (saved.bypassErrors) ($('bypassErrors') as HTMLInputElement).checked = true;
+  ($('report') as HTMLInputElement).checked = !!saved.report;
+  ($('bypassErrors') as HTMLInputElement).checked = !!saved.bypassErrors;
 
   // Folder mode requires native fs — only offer it inside the desktop shell.
   if (!isTauri) {
-    const folderTab = document.querySelector('.tab[data-mode="folder"]') as HTMLElement | null;
-    folderTab?.classList.add('hidden');
+    document.querySelector('#sourceTabs [data-mode="folder"]')?.classList.add('hidden');
   }
-  setMode(saved.mode === 'folder' && isTauri ? 'folder' : 'file');
+  setSource(saved.source === 'folder' && isTauri ? 'folder' : 'file');
 
-  PERSIST.concat(['report', 'bypassErrors']).forEach((id) => $(id).addEventListener('change', saveForm));
-  ['memberId', 'format'].forEach((id) => $(id).addEventListener('input', refreshGo));
+  PERSIST.concat(['report', 'bypassErrors']).forEach((id) =>
+    $(id).addEventListener('change', () => {
+      saveForm();
+      render();
+    }),
+  );
+  ['memberId', 'memberName', 'format', 'creationDate'].forEach((id) =>
+    $(id).addEventListener('input', render),
+  );
   wireDatePickers();
+  wireWindowControls();
 
-  document.querySelectorAll('.tab').forEach(
-    (t) =>
-      ((t as HTMLElement).onclick = () => {
-        setMode((t as HTMLElement).dataset.mode as Mode);
-        saveForm();
-        refreshGo();
-      }),
-  );
+  $('themeToggle').onclick = () => setTheme(theme === 'dark' ? 'light' : 'dark');
 
-  // App-mode (Convert / Validator) tabs.
-  document.querySelectorAll('#appTabs .tab').forEach(
-    (t) =>
-      ((t as HTMLElement).onclick = () => setAppMode((t as HTMLElement).dataset.app as AppMode)),
-  );
+  document.querySelectorAll<HTMLElement>('#sourceTabs .seg-opt').forEach((t) => {
+    t.onclick = () => {
+      setSource(t.dataset.mode as Source);
+      saveForm();
+      render();
+    };
+  });
+  document.querySelectorAll<HTMLElement>('#appTabs .seg-opt').forEach((t) => {
+    t.onclick = () => setAppMode(t.dataset.app as AppMode);
+  });
 
   wireFileMode();
   wireFolderMode();
   wireReferenceMode();
-  ($('go') as HTMLButtonElement).onclick = () => void (appMode === 'validate' ? onValidate() : onGenerate());
+
   ($('loginSubmit') as HTMLButtonElement).onclick = () => void onLoginSubmit();
   $('loginPass').addEventListener('keydown', (e) => {
     if ((e as KeyboardEvent).key === 'Enter') void onLoginSubmit();
   });
   ($('connectionRetry') as HTMLButtonElement).onclick = () => void evaluateGate(true);
   ($('logoutBtn') as HTMLButtonElement).onclick = () => void onLogout();
-  refreshGo();
+
+  void getAppVersion().then((v) => ($('appVersion').textContent = `v${v}`));
+
+  setAppMode('convert');
   startGateMonitor();
   void evaluateGate();
 }
 
-// ---- auth + connectivity gate --------------------------------------------
+/** Traffic lights drive the real window (the shell is undecorated). */
+function wireWindowControls() {
+  const act = (fn: (w: any) => Promise<unknown>) => async () => {
+    if (!isTauri) return;
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    await fn(getCurrentWindow());
+  };
+  ($('winClose') as HTMLButtonElement).onclick = act((w) => w.close());
+  ($('winMin') as HTMLButtonElement).onclick = act((w) => w.minimize());
+  ($('winZoom') as HTMLButtonElement).onclick = act((w) => w.toggleMaximize());
+}
+
+// ---- mode / source ---------------------------------------------------------
+const BLURB: Record<AppMode, string> = {
+  convert:
+    'Convert customer data in Excel into CRIF Highmark bureau submission files. Nothing leaves this machine.',
+  validate:
+    'Re-generates from your input workbook and compares it byte-for-byte against a filed submission or CRIF reference file.',
+};
+
+function setAppMode(m: AppMode) {
+  appMode = m;
+  document.querySelectorAll<HTMLElement>('#appTabs .seg-opt').forEach((x) => {
+    const on = x.dataset.app === m;
+    x.classList.toggle('active', on);
+    x.setAttribute('aria-selected', String(on));
+  });
+  $('modeBlurb').textContent = BLURB[m];
+  document
+    .querySelectorAll('.validate-only')
+    .forEach((el) => el.classList.toggle('hidden', m !== 'validate'));
+  // Switching modes resets the outcome; the form values stay put.
+  resetRun();
+}
+
+function setSource(s: Source) {
+  source = s;
+  document
+    .querySelectorAll<HTMLElement>('#sourceTabs .seg-opt')
+    .forEach((x) => x.classList.toggle('active', x.dataset.mode === s));
+  $('modeFile').classList.toggle('hidden', s !== 'file');
+  $('modeFolder').classList.toggle('hidden', s !== 'folder');
+}
+
+/** Back to a clean slate: no outcome, rail on Generate, setup view. */
+function resetRun() {
+  run = null;
+  status = 'idle';
+  step = 0;
+  stepDetails = [];
+  railTab = 'generate';
+  view = 'app';
+  savedPath = null;
+  open = {};
+  filter = 'all';
+  render();
+}
+
+// ---- auth + connectivity gate ---------------------------------------------
 // Full-screen modals are reserved for LOGIN and UPGRADE only. Connectivity is a
 // SOFT gate: when offline / the server is unreachable, we simply disable the
-// Generate button (see `online` + refreshGo) instead of flashing a modal on every
+// Generate button (see `online` + the CTA) instead of flashing a modal on every
 // focus change. The app does NOT block when backgrounded.
 //
 // The server is asked about the session ONLY on the CTAs — Generate, Validate, and the
@@ -201,7 +360,7 @@ function applyGate(
   }
   if (reason === 'login') ($('loginUser') as HTMLInputElement).focus();
   renderAccount(reason);
-  refreshGo();
+  render();
 }
 
 let toastTimer: number | undefined;
@@ -220,37 +379,17 @@ function showToast(message: string, ms = 6000) {
 }
 
 /**
- * The account chip + Sign out button live in the header, and are only meaningful while
- * the user is actually signed in and using the app — so they show only when the gate is
- * open ('ok'). On an unconfigured/dev build (no licence server) there is no session to
- * sign out of, so the chip stays hidden.
+ * The username + Sign out link live in the title bar / toolbar, and are only meaningful
+ * while the user is actually signed in and using the app — so they show only when the gate
+ * is open ('ok'). On an unconfigured/dev build (no licence server) there is no session to
+ * sign out of, so they stay hidden.
  */
 function renderAccount(reason: GateReason) {
   const signedIn = serverConfigured() && reason === 'ok' && isAuthenticated();
-  $('account').classList.toggle('hidden', !signedIn);
+  ($('accountUser') as HTMLElement).hidden = !signedIn;
+  ($('accountDivider') as HTMLElement).hidden = !signedIn;
+  ($('logoutBtn') as HTMLElement).hidden = !signedIn;
   if (signedIn) $('accountUser').textContent = currentUser()?.username ?? '';
-}
-
-/**
- * Sign out: tell the server to DELETE the session (so the seat is freed immediately and
- * the account is no longer counted as in use), clear the local tokens, and drop back to
- * the login overlay. `authLogout()` clears local state even if the network call fails, so
- * we always end up logged out on this device.
- */
-async function onLogout() {
-  const btn = $('logoutBtn') as HTMLButtonElement;
-  btn.disabled = true;
-  btn.textContent = 'Signing out…';
-  try {
-    await authLogout();
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Sign out';
-    ($('loginUser') as HTMLInputElement).value = '';
-    ($('loginPass') as HTMLInputElement).value = '';
-    $('loginError').textContent = '';
-    applyGate('login');
-  }
 }
 
 /**
@@ -314,11 +453,11 @@ function startGateMonitor() {
   // Connectivity only — these flip the soft gate locally and never call the server.
   window.addEventListener('online', () => {
     online = true;
-    refreshGo();
+    render();
   });
   window.addEventListener('offline', () => {
     online = false;
-    refreshGo();
+    render();
   });
 }
 
@@ -366,6 +505,28 @@ async function onLoginSubmit() {
   }
 }
 
+/**
+ * Sign out: tell the server to DELETE the session (so the seat is freed immediately and
+ * the account is no longer counted as in use), clear the local tokens, and drop back to
+ * the login overlay. `authLogout()` clears local state even if the network call fails, so
+ * we always end up logged out on this device.
+ */
+async function onLogout() {
+  const btn = $('logoutBtn') as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = 'Signing out…';
+  try {
+    await authLogout();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign out';
+    ($('loginUser') as HTMLInputElement).value = '';
+    ($('loginPass') as HTMLInputElement).value = '';
+    $('loginError').textContent = '';
+    applyGate('login');
+  }
+}
+
 // ---- file mode -------------------------------------------------------------
 function wireFileMode() {
   const drop = $('drop');
@@ -374,15 +535,15 @@ function wireFileMode() {
   drop.onclick = async () => {
     // Native picker in the desktop shell; <input> fallback in a browser.
     if (isTauri) {
-      const { open } = await import('@tauri-apps/plugin-dialog');
+      const { open: openDialog } = await import('@tauri-apps/plugin-dialog');
       const { readFile } = await import('@tauri-apps/plugin-fs');
-      const picked = await open({
+      const picked = await openDialog({
         multiple: false,
         filters: [{ name: 'Excel workbook', extensions: ['xlsx'] }],
       });
       if (typeof picked === 'string') {
         const bytes = await readFile(picked);
-        setPicked(toArrayBuffer(bytes), picked.split(/[\\/]/).pop() || picked);
+        setPicked(toArrayBuffer(bytes), picked.split(/[\\/]/).pop() || picked, picked);
       }
     } else {
       input.click();
@@ -391,48 +552,57 @@ function wireFileMode() {
 
   input.addEventListener('change', async (ev) => {
     const f = (ev.target as HTMLInputElement).files?.[0];
-    if (f) setPicked(await f.arrayBuffer(), f.name);
+    if (f) setPicked(await f.arrayBuffer(), f.name, null);
   });
+
+  ($('fileReplace') as HTMLButtonElement).onclick = () => {
+    pickedBytes = null;
+    pickedName = null;
+    pickedPath = null;
+    pickedSize = 0;
+    input.value = '';
+    resetRun();
+  };
 
   // HTML5 drag-drop (Tauri's own file-drop is disabled in tauri.conf.json so
   // these events still deliver real File objects to the webview).
-  ['dragover', 'drop'].forEach((e) =>
-    window.addEventListener(e, (ev) => ev.preventDefault()),
-  );
+  ['dragover', 'drop'].forEach((e) => window.addEventListener(e, (ev) => ev.preventDefault()));
+  wireDropTarget(drop, async (f) => setPicked(await f.arrayBuffer(), f.name, null));
+}
+
+/** Shared drag-over painting + drop handling for a dashed zone. */
+function wireDropTarget(zone: HTMLElement, onFile: (f: File) => void | Promise<void>) {
   ['dragover', 'dragenter'].forEach((e) =>
-    drop.addEventListener(e, (ev) => {
+    zone.addEventListener(e, (ev) => {
       ev.preventDefault();
-      drop.classList.add('over');
+      zone.classList.add('over');
     }),
   );
-  ['dragleave', 'dragend'].forEach((e) =>
-    drop.addEventListener(e, () => drop.classList.remove('over')),
-  );
-  drop.addEventListener('drop', async (ev) => {
+  ['dragleave', 'dragend'].forEach((e) => zone.addEventListener(e, () => zone.classList.remove('over')));
+  zone.addEventListener('drop', async (ev) => {
     ev.preventDefault();
-    drop.classList.remove('over');
+    zone.classList.remove('over');
     const f = (ev as DragEvent).dataTransfer?.files?.[0];
-    if (f) setPicked(await f.arrayBuffer(), f.name);
+    if (f) await onFile(f);
   });
 }
 
-function setPicked(bytes: ArrayBuffer, name: string) {
+function setPicked(bytes: ArrayBuffer, name: string, path: string | null) {
   pickedBytes = bytes;
   pickedName = name;
-  const drop = $('drop');
-  drop.classList.add('has-file');
-  drop.innerHTML = `<div class="fn">✓ ${escapeHtml(name)}</div><div class="swap">click to choose a different file</div>`;
-  refreshGo();
+  pickedPath = path;
+  pickedSize = bytes.byteLength;
+  resetRun();
 }
 
 // ---- folder mode -----------------------------------------------------------
 function wireFolderMode() {
   ($('chooseFolder') as HTMLButtonElement).onclick = async () => {
     if (!isTauri) return;
-    const { open } = await import('@tauri-apps/plugin-dialog');
+    const { open: openDialog } = await import('@tauri-apps/plugin-dialog');
     const { readDir } = await import('@tauri-apps/plugin-fs');
     const { join } = await import('@tauri-apps/api/path');
-    const dir = await open({ directory: true, multiple: false });
+    const dir = await openDialog({ directory: true, multiple: false });
     if (typeof dir !== 'string') return;
     folderPath = dir;
     $('folderPath').textContent = dir;
@@ -447,9 +617,9 @@ function wireFolderMode() {
       );
       select.innerHTML = opts.join('');
     }
-    refreshGo();
+    render();
   };
-  $('folderFile').addEventListener('change', refreshGo);
+  $('folderFile').addEventListener('change', () => resetRun());
 }
 
 // ---- reference (output) file picker — Validator mode -----------------------
@@ -459,9 +629,9 @@ function wireReferenceMode() {
 
   drop.onclick = async () => {
     if (isTauri) {
-      const { open } = await import('@tauri-apps/plugin-dialog');
+      const { open: openDialog } = await import('@tauri-apps/plugin-dialog');
       const { readFile } = await import('@tauri-apps/plugin-fs');
-      const picked = await open({ multiple: false });
+      const picked = await openDialog({ multiple: false });
       if (typeof picked === 'string') {
         const bytes = await readFile(picked);
         setRef(toArrayBuffer(bytes), picked.split(/[\\/]/).pop() || picked);
@@ -475,48 +645,17 @@ function wireReferenceMode() {
     const f = (ev.target as HTMLInputElement).files?.[0];
     if (f) setRef(await f.arrayBuffer(), f.name);
   });
-
-  ['dragover', 'dragenter'].forEach((e) =>
-    drop.addEventListener(e, (ev) => {
-      ev.preventDefault();
-      drop.classList.add('over');
-    }),
-  );
-  ['dragleave', 'dragend'].forEach((e) =>
-    drop.addEventListener(e, () => drop.classList.remove('over')),
-  );
-  drop.addEventListener('drop', async (ev) => {
-    ev.preventDefault();
-    drop.classList.remove('over');
-    const f = (ev as DragEvent).dataTransfer?.files?.[0];
-    if (f) setRef(await f.arrayBuffer(), f.name);
-  });
+  wireDropTarget(drop, async (f) => setRef(await f.arrayBuffer(), f.name));
 }
 
 function setRef(bytes: ArrayBuffer, name: string) {
   refBytes = bytes;
   refName = name;
-  const drop = $('refDrop');
-  drop.classList.add('has-file');
-  drop.innerHTML = `<div class="fn">✓ ${escapeHtml(name)}</div><div class="swap">click to choose a different file</div>`;
-  refreshGo();
+  $('refDrop').textContent = `${name} — replace`;
+  resetRun();
 }
 
-// ---- generate --------------------------------------------------------------
-function refreshGo() {
-  const hasInput = mode === 'file' ? !!pickedBytes : !!val('folderFile');
-  const ready = val('memberId').trim() && hasInput;
-  const go = $('go') as HTMLButtonElement;
-  go.disabled = blocked || !online || !ready;
-  // Soft connection gate: explain why the button is disabled (no modal).
-  go.title = !online ? 'No internet connection — reconnect to generate.' : '';
-  if (appMode === 'validate') {
-    go.textContent = refBytes ? 'Validate & compare against file' : 'Run validation on Master Sheet';
-  } else {
-    go.textContent = 'Generate submission file';
-  }
-}
-
+// ---- dates -----------------------------------------------------------------
 function toDdmmyyyy(s: string): string | undefined {
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((s || '').trim());
   if (!m) return undefined;
@@ -568,7 +707,7 @@ function wireDatePicker(textId: string, btnId: string, nativeId: string): void {
     const formatted = fromIsoDate(native.value);
     if (!formatted) return;
     text.value = formatted;
-    // Notify the rest of the app (persistence on 'change', gating on 'input').
+    // Notify the rest of the app (persistence on 'change', rendering on 'input').
     text.dispatchEvent(new Event('input', { bubbles: true }));
     text.dispatchEvent(new Event('change', { bubbles: true }));
   });
@@ -584,7 +723,7 @@ function wireDatePickers(): void {
  *   9th → W1 · 16th → W2 · 23rd → W3 · last day of the month → ME.
  * Instead of a free calendar we offer a month/year selector plus those four choices.
  * The hidden #reportingDate text input keeps the DD/MM/YYYY value the rest of the app
- * reads; #reportingCycleHint shows the resulting date + code.
+ * reads; #reportingCycleHint is the accent chip beside the label.
  */
 function wireReportingCyclePicker(): void {
   const monthEl = $('reportingMonth') as HTMLInputElement;
@@ -613,14 +752,13 @@ function wireReportingCyclePicker(): void {
       const parts = monthEl.value.split('-'); // "YYYY-MM"
       const y = Number(parts[0]);
       const m = Number(parts[1]);
-      const cycle = active.dataset.cycle!;
-      const day = cycleDay(y, m - 1, cycle);
+      const day = cycleDay(y, m - 1, active.dataset.cycle!);
       const dd = String(day).padStart(2, '0');
       const mm = String(m).padStart(2, '0');
       text.value = `${dd}/${mm}/${y}`;
-      if (hint) hint.textContent = `${dd}/${mm}/${y} · ${cycle}`;
+      if (hint) hint.textContent = text.value;
     }
-    // Notify the rest of the app (persistence on 'change', gating on 'input').
+    // Notify the rest of the app (persistence on 'change', rendering on 'input').
     text.dispatchEvent(new Event('input', { bubbles: true }));
     text.dispatchEvent(new Event('change', { bubbles: true }));
   };
@@ -633,6 +771,7 @@ function wireReportingCyclePicker(): void {
   opts.forEach((b) => b.addEventListener('click', () => selectCycle(b.dataset.cycle!)));
   monthEl.addEventListener('change', apply);
   monthEl.addEventListener('input', apply);
+  text.addEventListener('input', render);
 
   // Seed the controls from any restored #reportingDate (DD/MM/YYYY), else default to
   // the current month with the month-end (ME) cycle selected.
@@ -644,7 +783,8 @@ function wireReportingCyclePicker(): void {
     monthEl.value = `${yyyy}-${mm}`;
     const day = +dd;
     const lastDay = new Date(+yyyy, +mm, 0).getDate();
-    const cycle = day === 9 ? 'W1' : day === 16 ? 'W2' : day === 23 ? 'W3' : day === lastDay ? 'ME' : day < 9 ? 'W1' : day <= 16 ? 'W2' : day <= 23 ? 'W3' : 'ME';
+    const cycle =
+      day === 9 ? 'W1' : day === 16 ? 'W2' : day === 23 ? 'W3' : day === lastDay ? 'ME' : day < 9 ? 'W1' : day <= 16 ? 'W2' : day <= 23 ? 'W3' : 'ME';
     selectCycle(cycle);
   } else {
     const now = new Date();
@@ -653,8 +793,23 @@ function wireReportingCyclePicker(): void {
   }
 }
 
-async function onGenerate() {
-  if (blocked) return;
+/** The cycle code (W1/W2/W3/ME) currently selected in the segmented control. */
+function activeCycle(): string {
+  return (
+    document.querySelector<HTMLElement>('#cycleSeg .cycle-opt.active')?.dataset.cycle ?? ''
+  );
+}
+
+// ---- run -------------------------------------------------------------------
+let runToken = 0;
+class Cancelled extends Error {}
+
+function hasInput(): boolean {
+  return source === 'file' ? !!pickedBytes : !!val('folderFile');
+}
+
+async function onRun() {
+  if (blocked || status === 'running' || !hasInput()) return;
   // THE enforcement point: confirm a live, current, on-version session with the server at
   // the moment of generation. No grace window, no cached verdict — a session revoked (or a
   // build de-supported) since the last click cannot produce a submission file.
@@ -662,75 +817,146 @@ async function onGenerate() {
     await evaluateGate(true);
     if (blocked) return;
   }
-  const go = $('go') as HTMLButtonElement;
-  go.disabled = true;
-  $('result').innerHTML = 'Converting…';
-  try {
-    const bytes = await resolveBytes();
-    const reporting = toDdmmyyyy(val('reportingDate'));
-    const result = await runConvert({
-      formatId: val('format') as FormatId,
-      bytes,
-      memberId: val('memberId').trim(),
-      memberName: val('memberName').trim() || undefined,
-      reportingDate: reporting,
-      creationDate: toDdmmyyyy(val('creationDate')) || reporting,
-      report: ($('report') as HTMLInputElement).checked,
-      bypassErrors: ($('bypassErrors') as HTMLInputElement).checked,
-    });
-    render(result);
-  } catch (e) {
-    $('result').innerHTML = `<span class="pill err">ERROR</span> ${escapeHtml((e as Error).message)}`;
-  }
-  refreshGo();
-}
+  if (!online) return;
 
-async function onValidate() {
-  if (blocked) return;
-  if (serverConfigured()) {
-    await evaluateGate(true);
-    if (blocked) return;
-  }
-  const go = $('go') as HTMLButtonElement;
-  go.disabled = true;
-  $('result').innerHTML = refBytes ? 'Comparing…' : 'Validating Master Sheet…';
+  const token = ++runToken;
+  status = 'running';
+  step = 0;
+  stepDetails = [];
+  railTab = 'generate';
+  view = 'app';
+  savedPath = null;
+  render();
+
+  const started = Date.now();
+  const formatId = val('format') as FormatId;
+  const format = getFormat(formatId);
+  const memberId = val('memberId').trim();
+  const memberName = val('memberName').trim();
+  const reporting = toDdmmyyyy(val('reportingDate'));
+  const creation = toDdmmyyyy(val('creationDate')) || reporting;
+  const bypass = checked('bypassErrors');
+  const wantReport = checked('report');
+
+  // Each completed phase advances the rail, then yields so the webview repaints —
+  // the pipeline is otherwise one synchronous burst.
+  const onPhase = async (phase: ConvertPhase, detail?: string) => {
+    if (token !== runToken) throw new Cancelled();
+    const i = STEPS.findIndex((s) => s.phase === phase);
+    if (i >= 0) {
+      stepDetails[i] = detail ?? '';
+      step = i + 1;
+      render();
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+    }
+  };
+
   try {
     const bytes = await resolveBytes();
-    const reporting = toDdmmyyyy(val('reportingDate'));
-    if (!refBytes) {
-      // Standalone validation mode on Master Sheet
-      const result = await runConvert({
-        formatId: val('format') as FormatId,
-        bytes,
-        memberId: val('memberId').trim(),
-        memberName: val('memberName').trim() || undefined,
-        reportingDate: reporting,
-        creationDate: toDdmmyyyy(val('creationDate')) || reporting,
-        report: false,
-        allowWarnings: true,
-      });
-      renderValidate(result);
-    } else {
-      const result = await runValidate({
-        formatId: val('format') as FormatId,
+    let convert: ConvertResult;
+    let compare: CompareResult | undefined;
+
+    if (appMode === 'validate' && refBytes) {
+      const r = await runValidate({
+        formatId,
         bytes,
         referenceBytes: refBytes,
-        memberId: val('memberId').trim(),
-        memberName: val('memberName').trim() || undefined,
+        memberId,
+        memberName: memberName || undefined,
         reportingDate: reporting,
-        creationDate: toDdmmyyyy(val('creationDate')) || reporting,
-        ignoreLineEndings: ($('ignoreEol') as HTMLInputElement).checked,
+        creationDate: creation,
+        ignoreLineEndings: checked('ignoreEol'),
+        onPhase,
       });
-      renderValidate(result.convert, result.compare);
+      convert = r.convert;
+      compare = r.compare;
+    } else {
+      convert = await runConvert({
+        formatId,
+        bytes,
+        memberId,
+        memberName: memberName || undefined,
+        reportingDate: reporting,
+        creationDate: creation,
+        // Validator always wants bytes to compare, so warnings don't suppress the file.
+        report: appMode === 'validate' ? false : wantReport,
+        allowWarnings: appMode === 'validate' ? true : undefined,
+        bypassErrors: appMode === 'validate' ? undefined : bypass,
+      });
     }
+    if (token !== runToken) return;
+
+    const groups = buildGroups(convert.report.issues);
+    const outcome: Outcome = convert.report.ok ? 'success' : convert.output ? 'bypassed' : 'errors';
+    run = {
+      mode: appMode,
+      convert,
+      compare,
+      outcome,
+      groups,
+      errorRows: convert.report.errors.length,
+      warningRows: convert.report.warnings.length,
+      fileName: submissionFileName(format.outputExtension),
+      formatId,
+      formatLabel: format.label,
+      memberId,
+      memberName,
+      reportingDate: val('reportingDate'),
+      cycle: activeCycle(),
+      creationDate: val('creationDate'),
+      bypass,
+      report: wantReport && !!convert.reportWorkbook,
+      at: new Date(),
+      durationMs: Date.now() - started,
+    };
+    // The report view opens the first group by default.
+    open = groups.length ? { [groups[0]!.id]: true } : {};
+    filter = 'all';
+    status = 'done';
+    railTab = 'results';
+
+    if (convert.output) {
+      pushRecent({
+        name: run.fileName,
+        borrowers: convert.counts?.borrowerCount ?? 0,
+        warnings: run.warningRows,
+        clean: outcome === 'success' && run.warningRows === 0,
+        at: Date.now(),
+      });
+    }
+    render();
   } catch (e) {
-    $('result').innerHTML = `<span class="pill err">ERROR</span> ${escapeHtml((e as Error).message)}`;
+    if (e instanceof Cancelled || token !== runToken) return;
+    status = 'idle';
+    step = 0;
+    render();
+    showToast(`Conversion failed: ${(e as Error).message}`, 9000);
   }
-  refreshGo();
 }
 
+function cancelRun() {
+  runToken++;
+  status = 'idle';
+  step = 0;
+  stepDetails = [];
+  render();
+}
+
+/**
+ * Read the input bytes at the moment of the run. When the workbook was picked
+ * natively we re-read it from disk rather than reusing the bytes captured at pick
+ * time — the operator has usually just fixed cells in Excel and expects the re-run
+ * to see the saved file.
+ */
 async function resolveBytes(): Promise<ArrayBuffer> {
-  if (mode === 'file') {
+  if (source === 'file') {
+    if (pickedPath && isTauri) {
+      const { readFile } = await import('@tauri-apps/plugin-fs');
+      const bytes = toArrayBuffer(await readFile(pickedPath));
+      pickedBytes = bytes;
+      pickedSize = bytes.byteLength;
+      return bytes;
+    }
     if (!pickedBytes) throw new Error('No file selected.');
     return pickedBytes;
   }
@@ -740,186 +966,713 @@ async function resolveBytes(): Promise<ArrayBuffer> {
   return toArrayBuffer(await readFile(path));
 }
 
-// ---- render + save ---------------------------------------------------------
-function render(r: ConvertResult) {
-  const errCount = r.report.issues.filter((i) => i.severity === 'error').length;
-  let html = '';
-  if (r.report.ok) {
-    html = '<span class="pill ok">VALID</span>';
-  } else if (r.output) {
-    html = `<span class="pill warn">${errCount} ERROR${errCount === 1 ? '' : 'S'} (BYPASSED)</span> <span class="hint">Generated with validation bypass</span>`;
-  } else {
-    html = `<span class="pill err">${errCount} ERROR${errCount === 1 ? '' : 'S'} — file not generated</span>`;
-  }
-  if (r.counts)
-    html += ` &nbsp; ${r.counts.borrowerCount} borrowers · ${r.counts.accountCount} accounts`;
-
-  if (r.report.issues.length) {
-    html += '<table><tr><th>#</th><th>Severity</th><th>Sheet</th><th>Row</th><th>Column</th><th>Field</th><th>Message</th><th>Reference</th></tr>';
-    html += r.report.issues
-      .map(
-        (i, n) =>
-          `<tr><td>${n + 1}</td><td class="sev-${i.severity}">${i.severity}</td><td>${escapeHtml(i.sheet)}</td><td>${i.rowNumber}</td><td>${escapeHtml(i.column ?? '')}</td><td>${escapeHtml(i.fieldKey)}</td><td>${escapeHtml(i.message)}</td><td>${escapeHtml(i.reference ?? '')}</td></tr>`,
-      )
-      .join('');
-    html += '</table>';
+// ---- findings grouping -----------------------------------------------------
+/**
+ * Collapse the flat issue list into one card per rule — `rule + fieldKey + segment
+ * tag` — so the operator sees "7 rows fail this one rule" rather than 7 identical
+ * lines. Errors first, then by descending affected-row count.
+ */
+function buildGroups(issues: ValidationIssue[]): Group[] {
+  const byKey = new Map<string, ValidationIssue[]>();
+  for (const i of issues) {
+    const key = `${i.rule}|${i.fieldKey}|${i.sheet}`;
+    const bucket = byKey.get(key);
+    if (bucket) bucket.push(i);
+    else byKey.set(key, [i]);
   }
 
-  html += '<div class="actions" id="saveActions"></div>';
-  if (!r.report.ok && r.output) {
-    html += '<div class="note" style="color:#d97706;font-weight:500;">⚠️ Notice: This file was generated using validation bypass despite errors. CRIF bureau gateway may reject it until the issues above are corrected.</div>';
-  }
-  html += '<div class="note">Files are written only where you choose to save them — nothing is uploaded.</div>';
-  $('result').innerHTML = html;
+  const groups: Group[] = [];
+  for (const [key, list] of byKey) {
+    const first = list[0]!;
+    const label = first.fieldLabel || first.fieldKey || first.sheet;
+    const bypassable = list.some((i) => i.bypassable === false) ? false : true;
+    // A message every row shares is a rule-level sentence — usable as a headline
+    // when it is short, and worth repeating as guidance either way.
+    const shared = list.every((i) => i.message === first.message) ? first.message : undefined;
+    const where = [first.sheet, first.fieldKey, first.rule]
+      .filter(Boolean)
+      .concat(bypassable ? [] : ['not bypassable'])
+      .join(' · ');
 
-  const actions = $('saveActions');
-  const ext = getFormatExtension(val('format') as FormatId);
-  if (r.output) {
-    addSaveButton(actions, 'Save submission file', submissionFileName(ext), r.output, false);
-  }
-  if (r.reportWorkbook) {
-    addSaveButton(actions, 'Save workbook report (.xlsx)', 'report.xlsx', r.reportWorkbook, true);
-  }
-  // Indexed errors/warnings export — offered whenever there is anything to review.
-  if (r.report.issues.length) {
-    addAsyncSaveButton(actions, 'Export errors (.xlsx)', issuesFileName(), () => exportIssues(r.report), true);
-  }
-}
-
-/** `<member>_<input>_issues_<HHMMSS>.xlsx` — a stable, obvious name for the errors export. */
-function issuesFileName(): string {
-  const base = (val('memberId') || 'submission').replace(/[^\w.-]+/g, '_');
-  return `${base}_issues.xlsx`;
-}
-
-// ---- render the Validator result -------------------------------------------
-function renderValidate(c: ConvertResult, cmp?: CompareResult) {
-  let html = '';
-
-  // 1) The headline verdict.
-  if (!cmp) {
-    // Standalone Master Sheet validation mode
-    const errCount = c.report.errors.length;
-    const warnCount = c.report.warnings.length;
-    if (errCount === 0 && warnCount === 0) {
-      html += `<span class="pill ok">VALIDATION PASS ✓</span> Master Sheet is 100% compliant with bureau rules.`;
-    } else if (errCount > 0) {
-      html += `<span class="pill err">${errCount} BLOCKING ERROR${errCount === 1 ? '' : 'S'}</span> Rejection risk detected — fix marked cells below before submission.`;
-    } else {
-      html += `<span class="pill warn">${warnCount} WARNING${warnCount === 1 ? '' : 'S'}</span> Non-blocking warnings detected — review below before submission.`;
-    }
-    if (c.counts)
-      html += ` &nbsp;·&nbsp; ${c.counts.borrowerCount} borrowers · ${c.counts.accountCount} accounts`;
-  } else {
-    // Byte-comparison mode
-    if (!c.report.ok && !c.output) {
-      const errCount = c.report.errors.length;
-      html +=
-        `<span class="pill err">CANNOT COMPARE</span> ` +
-        `The input has ${errCount} blocking error${errCount === 1 ? '' : 's'}, so no output could be generated to compare. Fix the input below, then re-run.`;
-    } else if (cmp.match) {
-      html += `<span class="pill ok">MATCH ✓</span> ${escapeHtml(cmp.summary)}`;
-    } else {
-      html += `<span class="pill err">MISMATCH ✕</span> ${escapeHtml(cmp.summary)}`;
-    }
-
-    html +=
-      `<div class="note">Generated output: <strong>${cmp.generatedLength.toLocaleString()}</strong> bytes` +
-      ` &nbsp;·&nbsp; Your reference file: <strong>${cmp.referenceLength.toLocaleString()}</strong> bytes</div>`;
-
-    if (!cmp.match && cmp.diffs.length) {
-      html += '<table><tr><th>Offset</th><th>Line:Col</th><th>Generated</th><th>Your file</th><th>Context (generated → yours)</th></tr>';
-      html += cmp.diffs
-        .map((d) => {
-          const e = d.expected === undefined ? '∅ (end)' : `0x${d.expected.toString(16).padStart(2, '0')}`;
-          const a = d.actual === undefined ? '∅ (end)' : `0x${d.actual.toString(16).padStart(2, '0')}`;
-          return (
-            `<tr><td>${d.offset}</td><td>${d.line}:${d.column}</td>` +
-            `<td class="sev-error">${e}</td><td class="sev-error">${a}</td>` +
-            `<td><code class="selectable">${escapeHtml(d.expectedContext)}</code><br><code class="selectable">${escapeHtml(d.actualContext)}</code></td></tr>`
-          );
-        })
-        .join('');
-      html += '</table>';
-      if (cmp.truncated)
-        html += '<div class="note">Showing the first differences only — more exist further in the file.</div>';
-    }
+    groups.push({
+      id: key.replace(/[^\w]+/g, '-'),
+      severity: first.severity,
+      title: groupTitle(shared, first.rule, label),
+      where,
+      fix: groupFix(shared, first.rule, label, bypassable),
+      reference: first.reference,
+      rows: list.map((i) => ({
+        row: i.rowNumber ? String(i.rowNumber) : '—',
+        cell: i.column && i.rowNumber ? `${i.column}${i.rowNumber}` : '—',
+        value: displayValue(i.value),
+      })),
+      count: list.length,
+    });
   }
 
-  // Input validation issues table (with Column letters for easy spreadsheet correction)
-  if (c.report.issues.length) {
-    html += `<label style="margin-top:16px;">Validation Issues &amp; Bureau Rejection Risks <span class="hint">(${c.report.errors.length} error(s), ${c.report.warnings.length} warning(s))</span></label>`;
-    html += '<table><tr><th>#</th><th>Severity</th><th>Sheet</th><th>Row</th><th>Column</th><th>Field</th><th>Message</th><th>Reference</th></tr>';
-    html += c.report.issues
-      .map(
-        (i, n) =>
-          `<tr><td>${n + 1}</td><td class="sev-${i.severity}">${i.severity}</td><td>${escapeHtml(i.sheet)}</td><td>${i.rowNumber}</td><td>${escapeHtml(i.column ?? '')}</td><td>${escapeHtml(i.fieldKey)}</td><td>${escapeHtml(i.message)}</td><td>${escapeHtml(i.reference ?? '')}</td></tr>`,
-      )
-      .join('');
-    html += '</table>';
-  }
-
-  // Actions
-  html += '<div class="actions" id="saveActions"></div>';
-  html += '<div class="note">All files are processed locally on this machine — nothing is uploaded.</div>';
-  $('result').innerHTML = html;
-
-  const actions = $('saveActions');
-  if (c.output) {
-    const ext = getFormatExtension(val('format') as FormatId);
-    addSaveButton(actions, 'Save submission file', submissionFileName(ext), c.output, false);
-  }
-  if (c.report.issues.length) {
-    addAsyncSaveButton(actions, 'Export validation report (.xlsx)', issuesFileName(), () => exportIssues(c.report), true);
-  }
-}
-
-function addSaveButton(
-  parent: HTMLElement,
-  label: string,
-  defaultName: string,
-  data: Uint8Array,
-  alt: boolean,
-) {
-  const btn = document.createElement('button');
-  btn.className = 'dl' + (alt ? ' alt' : '');
-  btn.textContent = label;
-  btn.onclick = () => saveFile(defaultName, data);
-  parent.appendChild(btn);
+  const rank = (g: Group) => (g.severity === 'error' ? 0 : 1);
+  return groups.sort((a, b) => rank(a) - rank(b) || b.count - a.count);
 }
 
 /**
- * Like addSaveButton, but the bytes are produced on click by an async `build` (e.g. the
- * errors workbook is only assembled when the user asks for it). Disables the button while
- * building so a double-click can't launch two save dialogs.
+ * A rule-level headline. A message every row in the group shares already reads as
+ * the rule itself, so it becomes the title when it is short enough to sit on a rail
+ * card; anything longer (the engine's messages often quote the offending value and
+ * spell out the fix) gets a synthesised sentence instead, and the full text moves
+ * into the fix guidance below.
  */
-function addAsyncSaveButton(
-  parent: HTMLElement,
-  label: string,
-  defaultName: string,
-  build: () => Promise<Uint8Array>,
-  alt: boolean,
-) {
-  const btn = document.createElement('button');
-  btn.className = 'dl' + (alt ? ' alt' : '');
-  btn.textContent = label;
-  btn.onclick = async () => {
-    btn.disabled = true;
-    try {
-      await saveFile(defaultName, await build());
-    } finally {
-      btn.disabled = false;
-    }
-  };
-  parent.appendChild(btn);
+const TITLE_MAX = 80;
+
+function groupTitle(shared: string | undefined, rule: string, label: string): string {
+  if (shared && shared.length <= TITLE_MAX) return shared;
+  switch (rule) {
+    case 'enum':
+      return `${label} holds a code that is not in the bureau catalogue`;
+    case 'lookup':
+      return `${label} could not be matched to a bureau code`;
+    case 'format':
+      return `${label} format looks wrong`;
+    case 'date':
+      return `${label} is not a valid date`;
+    case 'length':
+      return `${label} exceeds the length the bureau accepts`;
+    case 'parse':
+      return `${label} could not be parsed from the sheet`;
+    case 'mandatory':
+      return `${label} is required but blank`;
+    case 'cardinality':
+      return `${label} breaks the required record count`;
+    case 'portal-mandatory':
+      return `${label} breaks a rule the portal enforces on upload`;
+    case 'empty-input':
+      return 'No records were read from the input workbook';
+    default:
+      return shared ?? `${label} failed validation`;
+  }
 }
 
-async function saveFile(defaultName: string, data: Uint8Array) {
+/**
+ * What to actually do about it. The engine's own sentence leads when it did not fit
+ * in the title, followed by the standing advice for that rule.
+ */
+function groupFix(shared: string | undefined, rule: string, label: string, bypassable: boolean): string {
+  const base: Record<string, string> = {
+    enum: `The cell holds a value that is not one of the codes the bureau publishes for ${label}. Replace it with the catalogue code named in the rule below.`,
+    lookup: `The value could not be resolved to a bureau code. Use the exact spelling from the catalogue, or enter the code directly.`,
+    format: `The value does not match the pattern the bureau expects for ${label}. Correct it, or clear the cell if the field is optional.`,
+    date: `Dates must read DD/MM/YYYY in the sheet. Re-enter the value, or format the column as text so Excel stops reinterpreting it.`,
+    length: `The value is longer than the field allows, so the bureau stores a truncated value. Shorten it in the sheet if the full text matters.`,
+    parse: `The reader could not translate this cell safely, so emitting the file would silently drop the value. Correct the source cell.`,
+    mandatory: `The bureau rejects the record when ${label} is blank. Fill the cell on every row listed.`,
+    cardinality: `The number of records per borrower does not match what the format requires. Add the missing row, or remove the extra one.`,
+    'portal-mandatory': `The portal enforces this on ingestion, so the file is refused at upload rather than at validation. Fix it in the sheet before re-running.`,
+    'empty-input': `Check the file is the right one, the data sits on the expected sheet, and the column headers match the format.`,
+  };
+  const parts = [
+    shared && shared.length > TITLE_MAX ? shared : null,
+    base[rule] ?? `Correct the listed cells in the sheet, then re-run.`,
+    bypassable ? null : 'Bypass cannot cover this one — no file is written until it is fixed.',
+  ];
+  return parts.filter(Boolean).join(' ');
+}
+
+function displayValue(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '(blank)';
+  if (v instanceof Date) return v.toLocaleDateString('en-GB');
+  return String(v);
+}
+
+// ---- render ----------------------------------------------------------------
+function render() {
+  $('appView').classList.toggle('hidden', view !== 'app');
+  $('reportView').classList.toggle('hidden', view !== 'report');
+  renderInputCard();
+  renderRail();
+  if (view === 'report') renderReport();
+  renderStatusLine();
+}
+
+function renderInputCard() {
+  const has = !!pickedBytes;
+  $('drop').classList.toggle('hidden', has);
+  $('fileCard').classList.toggle('hidden', !has);
+  if (!has) return;
+  $('fileName').textContent = pickedName ?? '';
+  const rows = run?.convert.counts?.borrowerCount;
+  $('fileMeta').textContent = [rows ? `${fmt(rows)} borrowers` : null, humanSize(pickedSize)]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function renderStatusLine() {
+  const user = currentUser()?.username;
+  let text: string;
+  if (status === 'running') {
+    text = `● working — step ${Math.min(step + 1, STEPS.length)} of ${STEPS.length}`;
+  } else if (status === 'done' && run) {
+    text = run.convert.output
+      ? `● file written · ${plural(run.warningRows, 'warning')}`
+      : `● ${plural(run.errorRows, 'error')} · ${plural(run.warningRows, 'warning')} · no file written`;
+  } else {
+    text = `● idle · on-device${user ? ` · signed in as ${user}` : ''}`;
+  }
+  $('statusLine').textContent = text;
+}
+
+// --- rail -------------------------------------------------------------------
+function renderRail() {
+  const rail = $('rail');
+  const parts: string[] = [];
+
+  // The toggle appears only once a run has completed, and never while running.
+  if (status === 'done' && run) {
+    const errors = run.outcome === 'errors';
+    const count = errors
+      ? run.errorRows
+      : run.outcome === 'bypassed'
+        ? run.errorRows + run.warningRows
+        : run.warningRows;
+    const label = errors ? 'Findings' : 'Result';
+    const tone = errors ? 'err' : 'warn';
+    parts.push(`
+      <div class="seg rail-toggle" role="group" aria-label="Rail view">
+        <button type="button" class="seg-opt ${railTab === 'generate' ? 'active' : ''}" data-rail="generate">${appMode === 'validate' ? 'Validate' : 'Generate'}</button>
+        <button type="button" class="seg-opt ${railTab === 'results' ? 'active' : ''}" data-rail="results">${label}${
+          count ? `<span class="tabbadge ${tone}">${fmt(count)}</span>` : ''
+        }</button>
+      </div>`);
+  }
+
+  if (status === 'running') parts.push(railRunning());
+  else if (status === 'done' && run && railTab === 'results') parts.push(railResult(run));
+  else parts.push(railGenerate());
+
+  rail.innerHTML = parts.join('');
+
+  rail.querySelectorAll<HTMLElement>('[data-rail]').forEach((b) => {
+    b.onclick = () => {
+      railTab = b.dataset.rail as RailTab;
+      render();
+    };
+  });
+  const go = rail.querySelector<HTMLButtonElement>('#go');
+  if (go) go.onclick = () => void onRun();
+  const cancel = rail.querySelector<HTMLButtonElement>('#cancelRun');
+  if (cancel) cancel.onclick = cancelRun;
+  rail.querySelectorAll<HTMLElement>('[data-group]').forEach((c) => {
+    c.onclick = () => openGroup(c.dataset.group!);
+  });
+  wireActions(rail);
+}
+
+function railGenerate(): string {
+  const ready = hasInput();
+  const rows = run?.convert.counts?.borrowerCount;
+  const check: Array<{ label: string; ok: boolean; value: string }> = [
+    { label: 'Bureau format', ok: true, value: shortFormat() },
+    { label: 'Member ID', ok: !!val('memberId').trim(), value: val('memberId').trim() || 'from sheet' },
+    {
+      label: 'Cycle',
+      ok: !!val('reportingDate'),
+      value: val('reportingDate') ? `${val('reportingDate')} · ${activeCycle()}` : 'from sheet',
+    },
+    {
+      label: 'Input workbook',
+      ok: ready,
+      value: ready ? (rows ? `${fmt(rows)} borrowers` : humanSize(pickedSize) || 'chosen') : 'not chosen',
+    },
+  ];
+  if (appMode === 'validate')
+    check.push({ label: 'Reference file', ok: !!refBytes, value: refName ? ellipsis(refName, 18) : 'optional' });
+
+  const hint = !ready
+    ? 'Choose an .xlsx input file to enable this.'
+    : !online
+      ? 'No internet connection — reconnect to generate.'
+      : checked('bypassErrors')
+        ? 'Bypass is on — errors will not stop the file being written.'
+        : 'Runs on this machine. Findings appear before anything is written to disk.';
+
+  const recent = loadRecent().slice(0, 2);
+
+  return `
+    <div class="rail-body">
+      <h3>${appMode === 'validate' ? 'Validate' : 'Generate'}</h3>
+      <div class="checklist">
+        ${check
+          .map(
+            (c) => `
+          <div class="checkrow-item">
+            <div class="dot ${c.ok ? 'done' : ''}">${c.ok ? '✓' : '·'}</div>
+            <div class="checkrow-label">${escapeHtml(c.label)}</div>
+            <div class="checkrow-val ${c.ok ? '' : 'pending'}">${escapeHtml(c.value)}</div>
+          </div>`,
+          )
+          .join('')}
+      </div>
+      <button type="button" class="cta" id="go" ${ready && online && !blocked ? '' : 'disabled'}>
+        ${appMode === 'validate' ? 'Validate and compare' : 'Generate submission file'}
+      </button>
+      <p class="cta-hint">${escapeHtml(hint)}</p>
+      <div class="spacer"></div>
+      ${
+        recent.length
+          ? `<div class="recent">
+               <h3>Recent runs</h3>
+               ${recent
+                 .map(
+                   (r) => `
+                 <div class="recent-item">
+                   <span class="recent-dot ${r.clean ? '' : 'warn'}"></span>
+                   <span class="recent-text">
+                     <span class="recent-name">${escapeHtml(r.name)}</span>
+                     <span class="recent-meta">${escapeHtml(
+                       [
+                         `${fmt(r.borrowers)} borrowers`,
+                         r.clean ? 'clean' : plural(r.warnings, 'warning'),
+                         relativeTime(r.at),
+                       ].join(' · '),
+                     )}</span>
+                   </span>
+                 </div>`,
+                 )
+                 .join('')}
+             </div>`
+          : ''
+      }
+    </div>`;
+}
+
+function railRunning(): string {
+  return `
+    <div class="rail-body">
+      <div class="run-head">
+        <span class="spinner"></span>
+        <span class="run-title">${appMode === 'validate' ? 'Validating and comparing…' : 'Generating submission file…'}</span>
+      </div>
+      <div class="progress"><i style="width:${(step / STEPS.length) * 100}%"></i></div>
+      <div class="checklist steps">
+        ${STEPS.map((s, i) => {
+          const done = i < step;
+          const now = i === step;
+          return `
+          <div class="checkrow-item">
+            <div class="dot ${done ? 'done' : now ? 'active' : ''}">${done ? '✓' : ''}</div>
+            <div class="checkrow-label ${done || now ? '' : 'pending'}">${s.label}</div>
+            <div class="step-detail">${escapeHtml(done ? (stepDetails[i] ?? '') : now ? 'working…' : '')}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      <button type="button" class="cancel" id="cancelRun">Cancel</button>
+      <div class="spacer"></div>
+    </div>`;
+}
+
+function railResult(r: Run): string {
+  const { tone, label, note } = outcomeCopy(r);
+  const showFindings = r.groups.length > 0;
+
+  return `
+    <div class="rail-body results">
+      <div class="outcome-pill ${tone}">${escapeHtml(label)}</div>
+      <p class="outcome-note">${escapeHtml(note)}</p>
+      ${
+        showFindings
+          ? `<div class="findlist">
+               ${r.groups.map((g) => findCard(g)).join('')}
+             </div>`
+          : ''
+      }
+      ${r.convert.output ? outputBlock(r) : ''}
+      <div class="actions">${actionsFor(r, 'rail')}</div>
+      <div class="spacer"></div>
+      <p class="railfoot">${
+        showFindings
+          ? 'Findings are keyed to the exact sheet cell. Export them and hand the file back to whoever owns the Master Sheet.'
+          : 'The file is written only after validation passes, so what you save is what the portal will accept.'
+      }</p>
+    </div>`;
+}
+
+function findCard(g: Group): string {
+  return `
+    <button type="button" class="findcard" data-group="${g.id}">
+      <span class="sevchip ${g.severity === 'error' ? 'err' : 'warn'}">${g.severity === 'error' ? 'ERROR' : 'WARN'}</span>
+      <span class="find-text">
+        <span class="find-title">${escapeHtml(g.title)}</span>
+        <span class="find-where">${escapeHtml(g.where)}</span>
+      </span>
+      <span class="find-count">${plural(g.count, 'row')}</span>
+    </button>`;
+}
+
+/** The output card + the 2×2 count grid shown in the rail on a written file. */
+function outputBlock(r: Run): string {
+  const counts = countCards(r);
+  return `
+    <div class="outcard">
+      <div class="badge-sq ok mono">${escapeHtml(extLabel(r))}</div>
+      <div class="outcard-text">
+        <div class="outcard-name">${escapeHtml(r.fileName)}</div>
+        <div class="outcard-meta">${escapeHtml(outMeta(r))}</div>
+      </div>
+    </div>
+    <div class="countgrid">
+      ${counts.map((c) => `<div class="countcard"><div class="n">${escapeHtml(c.n)}</div><div class="k">${escapeHtml(c.k)}</div></div>`).join('')}
+    </div>`;
+}
+
+function countCards(r: Run): Array<{ n: string; k: string }> {
+  const c = r.convert.counts;
+  if (!c) return [];
+  const accountLabel = r.formatId.startsWith('commercial') ? 'Credit facilities' : 'Accounts';
+  return [
+    { n: fmt(c.borrowerCount), k: 'Borrowers' },
+    { n: fmt(c.accountCount), k: accountLabel },
+    { n: fmt(c.addressCount), k: 'Addresses' },
+    { n: fmt(c.segmentCount), k: 'Segments' },
+  ];
+}
+
+/**
+ * The headline verdict. In Validator mode a byte comparison, when one ran, takes
+ * over the pill and the note — that is the answer the operator came for.
+ */
+function outcomeCopy(r: Run): { tone: 'ok' | 'warn' | 'err'; label: string; note: string } {
+  if (r.mode === 'validate' && refBytes) {
+    if (!r.compare) {
+      return {
+        tone: 'err',
+        label: 'CANNOT COMPARE',
+        note: `The input has ${plural(r.errorRows, 'blocking error')}, so no output could be generated to compare. Fix the cells below, then re-run.`,
+      };
+    }
+    const bytes = `Generated ${fmt(r.compare.generatedLength)} bytes · reference ${fmt(r.compare.referenceLength)} bytes.`;
+    return r.compare.match
+      ? { tone: 'ok', label: 'MATCH ✓', note: `${r.compare.summary} ${bytes}` }
+      : { tone: 'err', label: 'MISMATCH ✕', note: `${r.compare.summary} ${bytes}` };
+  }
+
+  if (r.outcome === 'errors') {
+    const rules = r.groups.filter((g) => g.severity === 'error').length;
+    const nonBypassable = r.groups.some((g) => g.where.includes('not bypassable'));
+    const tail = r.bypass && nonBypassable
+      ? ' Bypass cannot cover the parse errors, so nothing was written.'
+      : ' Fix the cells, then re-run.';
+    return {
+      tone: 'err',
+      label: `${fmt(r.errorRows)} BLOCKING ERROR${r.errorRows === 1 ? '' : 'S'}`,
+      note: `No file written. ${plural(rules, 'rule')} failed across ${plural(r.errorRows, 'row')}, plus ${plural(r.warningRows, 'warning')}.${tail}`,
+    };
+  }
+  if (r.outcome === 'bypassed') {
+    return {
+      tone: 'warn',
+      label: 'GENERATED WITH BYPASS',
+      note: `${plural(r.errorRows, 'error')} carried into the file — rejection risk on submission.`,
+    };
+  }
+  return {
+    tone: 'ok',
+    label: 'GENERATED',
+    note: r.warningRows
+      ? `${plural(r.warningRows, 'warning')} reviewed · file written to disk.`
+      : 'No errors, no warnings · file written to disk.',
+  };
+}
+
+function outMeta(r: Run): string {
+  if (!r.convert.output) return 'Fix the blocking findings, then re-run';
+  const spec = getFormat(r.formatId);
+  const eol = spec.lineEnding === '\r\n' ? 'CRLF' : spec.lineEnding === '\n' ? 'LF' : 'no line breaks';
+  return [
+    humanSize(r.convert.output.length),
+    spec.fileEncoding.toUpperCase(),
+    eol,
+    r.report ? '+ workbook report' : 'no workbook report',
+  ].join(' · ');
+}
+
+function extLabel(r: Run): string {
+  return getFormat(r.formatId).outputExtension.replace('.', '').toUpperCase();
+}
+
+// --- report view ------------------------------------------------------------
+function openGroup(id: string) {
+  view = 'report';
+  filter = 'all';
+  open[id] = true;
+  render();
+}
+
+function renderReport() {
+  if (!run) return;
+  const r = run;
+  const { tone, label, note } = outcomeCopy(r);
+  const visible = r.groups.filter((g) =>
+    filter === 'all' ? true : filter === 'errors' ? g.severity === 'error' : g.severity === 'warning',
+  );
+
+  const chips = (
+    [
+      ['all', `All ${fmt(r.errorRows + r.warningRows)}`],
+      ['errors', `Errors ${fmt(r.errorRows)}`],
+      ['warnings', `Warnings ${fmt(r.warningRows)}`],
+    ] as Array<[Filter, string]>
+  )
+    .map(
+      ([k, text]) =>
+        `<button type="button" class="seg-opt ${filter === k ? 'active' : ''}" data-filter="${k}">${escapeHtml(text)}</button>`,
+    )
+    .join('');
+
+  const preview = (r.convert.outputText ?? '')
+    .split(/\r?\n/)
+    .filter((l) => l.length)
+    .slice(0, 5)
+    .map((l) => ellipsis(l, 160))
+    .join('\n');
+
+  const spec = getFormat(r.formatId);
+  const eol = spec.lineEnding === '\r\n' ? 'CRLF' : spec.lineEnding === '\n' ? 'LF' : 'single line';
+
+  $('reportView').innerHTML = `
+    <div class="report-head">
+      <button type="button" class="backbtn" id="backToSetup">← Back to setup</button>
+      <div class="outcome-pill ${tone}">${escapeHtml(label)}</div>
+      <p class="outcome-note">${escapeHtml(note)}</p>
+      <div class="runstamp">${escapeHtml(stamp(r))}</div>
+    </div>
+    <div class="report-split">
+      <div class="report-main">
+        ${
+          r.groups.length
+            ? `<div class="section">
+                 <div class="section-head">
+                   <h2>Findings</h2>
+                   <div class="rule"></div>
+                   <div class="seg seg-sm">${chips}</div>
+                 </div>
+                 ${visible.map((g) => groupCard(g)).join('')}
+               </div>`
+            : ''
+        }
+        ${
+          r.convert.output
+            ? `<div class="section">
+                 <div class="section-head"><h2>File contents</h2><div class="rule"></div></div>
+                 <div class="bigcounts">
+                   ${countCards(r)
+                     .map((c) => `<div class="countcard"><div class="n">${escapeHtml(c.n)}</div><div class="k">${escapeHtml(c.k)}</div></div>`)
+                     .join('')}
+                 </div>
+                 <div class="panel">
+                   <div class="panel-head">First records<span class="note">${escapeHtml(`${spec.fileEncoding.toUpperCase()} · ${eol}`)}</span></div>
+                   <pre class="panel-pre selectable">${escapeHtml(preview)}</pre>
+                 </div>
+               </div>`
+            : ''
+        }
+      </div>
+      <aside class="outrail">
+        <h3>Output</h3>
+        <div class="outcard">
+          <div class="badge-sq ${r.convert.output ? 'ok' : 'err'} mono">${escapeHtml(extLabel(r))}</div>
+          <div class="outcard-text">
+            <div class="outcard-name">${escapeHtml(r.convert.output ? r.fileName : 'nothing written')}</div>
+            <div class="outcard-meta">${escapeHtml(outMeta(r))}</div>
+          </div>
+        </div>
+        <div class="actions">${actionsFor(r, 'report')}</div>
+        <div class="hr"></div>
+        <div class="facts">
+          ${runFacts(r)
+            .map((f) => `<div class="fact"><div class="k">${escapeHtml(f.k)}</div><div class="v">${escapeHtml(f.v)}</div></div>`)
+            .join('')}
+        </div>
+        <div class="spacer"></div>
+        <p class="railfoot">${
+          r.groups.length
+            ? 'Findings are keyed to the exact sheet cell. Export them and hand the file back to whoever owns the Master Sheet.'
+            : 'The file is written only after validation passes, so what you save is what the portal will accept.'
+        }</p>
+      </aside>
+    </div>`;
+
+  const rv = $('reportView');
+  (rv.querySelector('#backToSetup') as HTMLButtonElement).onclick = () => {
+    view = 'app';
+    render();
+  };
+  rv.querySelectorAll<HTMLElement>('[data-filter]').forEach((b) => {
+    b.onclick = () => {
+      filter = b.dataset.filter as Filter;
+      render();
+    };
+  });
+  rv.querySelectorAll<HTMLElement>('[data-toggle]').forEach((b) => {
+    b.onclick = () => {
+      const id = b.dataset.toggle!;
+      open[id] = !open[id];
+      render();
+    };
+  });
+  wireActions(rv);
+}
+
+/** Inline row tables cap at 3; the full set belongs in the .xlsx export. */
+const INLINE_ROWS = 3;
+
+function groupCard(g: Group): string {
+  const isOpen = !!open[g.id];
+  const shown = g.rows.slice(0, INLINE_ROWS);
+  const more = g.rows.length - shown.length;
+  return `
+    <div class="group">
+      <button type="button" class="group-head" data-toggle="${g.id}" aria-expanded="${isOpen}">
+        <span class="sevchip ${g.severity === 'error' ? 'err' : 'warn'}">${g.severity === 'error' ? 'ERROR' : 'WARN'}</span>
+        <span class="find-text">
+          <span class="find-title">${escapeHtml(g.title)}</span>
+          <span class="find-where">${escapeHtml(g.where)}</span>
+        </span>
+        <span class="group-right">
+          <span class="find-count">${plural(g.count, 'row')}</span>
+          <span class="chevron">${isOpen ? '▲' : '▼'}</span>
+        </span>
+      </button>
+      ${
+        isOpen
+          ? `<div class="group-body">
+               <p class="group-fix">${escapeHtml(g.fix)}</p>
+               <div class="rowtable">
+                 <div class="thead"><div>Row</div><div>Cell</div><div>Value read</div></div>
+                 ${shown
+                   .map(
+                     (row) => `
+                   <div class="trow">
+                     <div class="r">${escapeHtml(row.row)}</div>
+                     <div class="c">${escapeHtml(row.cell)}</div>
+                     <div class="v selectable" title="${escapeHtml(row.value)}">${escapeHtml(row.value)}</div>
+                   </div>`,
+                   )
+                   .join('')}
+                 ${more > 0 ? `<div class="tmore">${plural(more, 'more row')}</div>` : ''}
+               </div>
+               ${g.reference ? `<div class="group-rule"><b>Rule</b>${escapeHtml(g.reference)}</div>` : ''}
+             </div>`
+          : ''
+      }
+    </div>`;
+}
+
+function runFacts(r: Run): Array<{ k: string; v: string }> {
+  return [
+    { k: 'Format', v: r.formatLabel },
+    { k: 'Member', v: [r.memberId, r.memberName].filter(Boolean).join(' · ') || '—' },
+    { k: 'Cycle', v: r.reportingDate ? `${r.reportingDate} (${r.cycle})` : '—' },
+    { k: 'Created', v: r.creationDate || '—' },
+    { k: 'Bypass', v: r.bypass ? 'ON' : 'off' },
+  ];
+}
+
+function stamp(r: Run): string {
+  const d = r.at;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())} · ${(r.durationMs / 1000).toFixed(1)}s`;
+}
+
+// --- actions ----------------------------------------------------------------
+type ActionId = 'open-report' | 'export-issues' | 'rerun' | 'save' | 'save-report' | 'reveal';
+
+function actionsFor(r: Run, where: 'rail' | 'report'): string {
+  const defs: Array<[ActionId, string, boolean]> = [];
+  if (!r.convert.output) {
+    if (where === 'rail') defs.push(['open-report', 'Open full findings', true]);
+    defs.push(['export-issues', 'Export findings (.xlsx)', where === 'report']);
+    defs.push(['rerun', 'Mark cells fixed, re-run', false]);
+  } else {
+    defs.push(['save', 'Save submission file…', true]);
+    if (where === 'rail') defs.push(['open-report', 'Open full report', false]);
+    if (r.convert.reportWorkbook) defs.push(['save-report', 'Save workbook report (.xlsx)', false]);
+    else defs.push(['reveal', 'Reveal in folder', false]);
+    if (r.groups.length) defs.push(['export-issues', 'Export findings (.xlsx)', false]);
+  }
+  return defs
+    .map(
+      ([id, label, primary]) =>
+        `<button type="button" class="action ${primary ? 'primary' : 'secondary'}" data-action="${id}">${escapeHtml(label)}</button>`,
+    )
+    .join('');
+}
+
+function wireActions(scope: HTMLElement) {
+  scope.querySelectorAll<HTMLButtonElement>('[data-action]').forEach((btn) => {
+    btn.onclick = () => void onAction(btn.dataset.action as ActionId, btn);
+  });
+}
+
+async function onAction(id: ActionId, btn: HTMLButtonElement) {
+  const r = run;
+  if (!r) return;
+  switch (id) {
+    case 'open-report':
+      view = 'report';
+      filter = 'all';
+      render();
+      return;
+    case 'rerun':
+      await onRun();
+      return;
+    case 'save':
+      if (r.convert.output) await withBusy(btn, () => saveFile(r.fileName, r.convert.output!));
+      return;
+    case 'save-report':
+      if (r.convert.reportWorkbook)
+        await withBusy(btn, () => saveFile(reportFileName(), r.convert.reportWorkbook!, false));
+      return;
+    case 'export-issues':
+      await withBusy(btn, async () => saveFile(issuesFileName(), await exportIssues(r.convert.report), false));
+      return;
+    case 'reveal':
+      await revealSaved(r);
+      return;
+  }
+}
+
+async function withBusy(btn: HTMLButtonElement, work: () => Promise<unknown>) {
+  btn.disabled = true;
+  try {
+    await work();
+  } catch (e) {
+    showToast(`Could not save: ${(e as Error).message}`, 8000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/**
+ * "Reveal in folder" only means something once the file exists on disk, so the
+ * first click saves it and then opens the containing folder.
+ */
+async function revealSaved(r: Run) {
+  if (!savedPath) {
+    if (!r.convert.output) return;
+    await saveFile(r.fileName, r.convert.output);
+    if (!savedPath) return; // dialog cancelled
+  }
+  if (!isTauri) return;
+  const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+  await revealItemInDir(savedPath);
+}
+
+async function saveFile(defaultName: string, data: Uint8Array, isSubmission = true) {
   if (isTauri) {
     const { save } = await import('@tauri-apps/plugin-dialog');
     const { writeFile } = await import('@tauri-apps/plugin-fs');
     const path = await save({ defaultPath: defaultName });
-    if (path) await writeFile(path, data);
+    if (!path) return;
+    await writeFile(path, data);
+    if (isSubmission) savedPath = path;
   } else {
     const blob = new Blob([toArrayBuffer(data)], { type: 'application/octet-stream' });
     const a = document.createElement('a');
@@ -930,9 +1683,16 @@ async function saveFile(defaultName: string, data: Uint8Array) {
   }
 }
 
-// ---- helpers ---------------------------------------------------------------
-function getFormatExtension(id: FormatId): string {
-  return getFormat(id).outputExtension;
+// ---- names + formatting ----------------------------------------------------
+/** `<member>_issues.xlsx` — a stable, obvious name for the findings export. */
+function issuesFileName(): string {
+  const base = (val('memberId') || 'submission').replace(/[^\w.-]+/g, '_');
+  return `${base}_issues.xlsx`;
+}
+
+function reportFileName(): string {
+  const base = (val('memberId') || 'submission').replace(/[^\w.-]+/g, '_');
+  return `${base}_report.xlsx`;
 }
 
 /**
@@ -965,6 +1725,38 @@ function submissionFileName(ext: string): string {
     String(now.getSeconds()).padStart(2, '0');
 
   return `${member}_Commercial_${reporting}_${creation}_${hhmmss}_${cycle}${ext}`;
+}
+
+/** Short format name for the readiness checklist, e.g. "UCRF V3.10". */
+function shortFormat(): string {
+  const label = getFormat(val('format') as FormatId).label;
+  return label.replace(/^(Commercial|Consumer|MFI)\s+/, '');
+}
+
+function fmt(n: number): string {
+  return n.toLocaleString('en-IN');
+}
+
+function plural(n: number, word: string): string {
+  return `${fmt(n)} ${word}${n === 1 ? '' : 's'}`;
+}
+
+function humanSize(bytes: number): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function relativeTime(at: number): string {
+  const days = Math.floor((Date.now() - at) / 86_400_000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  return `${days} days ago`;
+}
+
+function ellipsis(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
 function toArrayBuffer(u8: Uint8Array): ArrayBuffer {

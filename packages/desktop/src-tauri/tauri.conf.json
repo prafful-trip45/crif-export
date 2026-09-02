@@ -14,11 +14,13 @@
       {
         "label": "main",
         "title": "CIC - Text and TUDF converter",
-        "width": 980,
-        "height": 840,
-        "minWidth": 720,
-        "minHeight": 600,
-        "dragDropEnabled": false
+        "width": 1360,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "dragDropEnabled": false,
+        "decorations": false,
+        "transparent": false
       }
     ],
     "security": {
