@@ -33,6 +33,8 @@ export interface ValidationIssue {
   fieldLabel?: string;
   rule: ValidationRule;
   message: string;
+  /** Bureau specification section, catalogue, or source layout behind this finding. */
+  reference?: string;
   value: unknown;
   /**
    * False for errors where emitting a file would silently discard or corrupt a

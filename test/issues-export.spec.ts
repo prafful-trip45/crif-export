@@ -48,6 +48,7 @@ describe('issues export workbook', () => {
 
     const rows = await readIssues(await writeIssuesWorkbook(r.report));
     expect(rows).toHaveLength(r.report.issues.length);
+    expect(rows.every((x) => x['Reference'] !== '')).toBe(true);
 
     // 1) Stable 1-based index in insertion order.
     expect(rows.map((x) => x['#'])).toEqual(rows.map((_, i) => String(i + 1)));

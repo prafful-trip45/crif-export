@@ -229,6 +229,8 @@ export interface SegmentSeed {
     message: string;
     severity?: Severity;
     rule?: 'lookup' | 'parse';
+    /** Bureau specification section, catalogue, or source layout behind this finding. */
+    reference?: string;
     /** Prevent output even if the operator requests validation bypass. */
     blocksBypass?: boolean;
   }>;

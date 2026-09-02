@@ -305,7 +305,7 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
     }
     const buffer = new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer).buffer;
 
-    const result = await convert(buffer, commercialUcrfFlat, META, {
+    const result = await convert(buffer, commercialUcrfFlatV310, META, {
       allowWarnings: true,
       bypassErrors: true,
     });
@@ -315,6 +315,8 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
     );
     expect(stateErrors).toHaveLength(2);
     expect(stateErrors.every((issue) => issue.bypassable === false)).toBe(true);
+    expect(stateErrors.every((issue) => issue.reference === 'CRIF Commercial UCRF V3.10 Catalogue 8.6 (State/Union Territory codes)')).toBe(true);
+    expect(result.report.errors.every((issue) => Boolean(issue.reference))).toBe(true);
     expect(result.output).toBeUndefined();
   });
 });

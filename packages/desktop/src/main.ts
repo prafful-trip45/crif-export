@@ -755,11 +755,11 @@ function render(r: ConvertResult) {
     html += ` &nbsp; ${r.counts.borrowerCount} borrowers · ${r.counts.accountCount} accounts`;
 
   if (r.report.issues.length) {
-    html += '<table><tr><th>#</th><th>Severity</th><th>Sheet</th><th>Row</th><th>Column</th><th>Field</th><th>Message</th></tr>';
+    html += '<table><tr><th>#</th><th>Severity</th><th>Sheet</th><th>Row</th><th>Column</th><th>Field</th><th>Message</th><th>Reference</th></tr>';
     html += r.report.issues
       .map(
         (i, n) =>
-          `<tr><td>${n + 1}</td><td class="sev-${i.severity}">${i.severity}</td><td>${escapeHtml(i.sheet)}</td><td>${i.rowNumber}</td><td>${escapeHtml(i.column ?? '')}</td><td>${escapeHtml(i.fieldKey)}</td><td>${escapeHtml(i.message)}</td></tr>`,
+          `<tr><td>${n + 1}</td><td class="sev-${i.severity}">${i.severity}</td><td>${escapeHtml(i.sheet)}</td><td>${i.rowNumber}</td><td>${escapeHtml(i.column ?? '')}</td><td>${escapeHtml(i.fieldKey)}</td><td>${escapeHtml(i.message)}</td><td>${escapeHtml(i.reference ?? '')}</td></tr>`,
       )
       .join('');
     html += '</table>';
@@ -849,11 +849,11 @@ function renderValidate(c: ConvertResult, cmp?: CompareResult) {
   // Input validation issues table (with Column letters for easy spreadsheet correction)
   if (c.report.issues.length) {
     html += `<label style="margin-top:16px;">Validation Issues &amp; Bureau Rejection Risks <span class="hint">(${c.report.errors.length} error(s), ${c.report.warnings.length} warning(s))</span></label>`;
-    html += '<table><tr><th>#</th><th>Severity</th><th>Sheet</th><th>Row</th><th>Column</th><th>Field</th><th>Message</th></tr>';
+    html += '<table><tr><th>#</th><th>Severity</th><th>Sheet</th><th>Row</th><th>Column</th><th>Field</th><th>Message</th><th>Reference</th></tr>';
     html += c.report.issues
       .map(
         (i, n) =>
-          `<tr><td>${n + 1}</td><td class="sev-${i.severity}">${i.severity}</td><td>${escapeHtml(i.sheet)}</td><td>${i.rowNumber}</td><td>${escapeHtml(i.column ?? '')}</td><td>${escapeHtml(i.fieldKey)}</td><td>${escapeHtml(i.message)}</td></tr>`,
+          `<tr><td>${n + 1}</td><td class="sev-${i.severity}">${i.severity}</td><td>${escapeHtml(i.sheet)}</td><td>${i.rowNumber}</td><td>${escapeHtml(i.column ?? '')}</td><td>${escapeHtml(i.fieldKey)}</td><td>${escapeHtml(i.message)}</td><td>${escapeHtml(i.reference ?? '')}</td></tr>`,
       )
       .join('');
     html += '</table>';

@@ -25,11 +25,12 @@ export async function writeIssuesWorkbook(report: ValidationReport): Promise<Buf
     { header: 'Cell', key: 'cell', width: 8 },
     { header: 'Field', key: 'field', width: 22 },
     { header: 'Message', key: 'message', width: 90 },
+    { header: 'Reference', key: 'reference', width: 58 },
   ];
   ws.columns = columns;
   ws.getRow(1).font = { bold: true };
   ws.views = [{ state: 'frozen', ySplit: 1 }];
-  ws.autoFilter = { from: 'A1', to: 'H1' };
+  ws.autoFilter = { from: 'A1', to: 'I1' };
 
   // Errors first (blocking), then warnings; preserve original order within each group.
   const ordered: ValidationIssue[] = [
@@ -49,8 +50,10 @@ export async function writeIssuesWorkbook(report: ValidationReport): Promise<Buf
       cell,
       field: i.fieldLabel ?? i.fieldKey,
       message: i.message,
+      reference: i.reference ?? '',
     });
     row.getCell('message').alignment = { wrapText: true, vertical: 'top' };
+    row.getCell('reference').alignment = { wrapText: true, vertical: 'top' };
     if (i.severity === 'error') row.getCell('severity').font = { color: { argb: 'FFC0392B' }, bold: true };
     else row.getCell('severity').font = { color: { argb: 'FFB9770E' } };
   });

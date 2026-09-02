@@ -222,8 +222,8 @@ function render(r){
   let html = r.ok ? '<span class="pill ok">VALID</span>' : '<span class="pill err">'+r.issues.filter(i=>i.severity==='error').length+' ERRORS — file not generated</span>';
   if (r.counts) html += ' &nbsp; '+r.counts.borrowerCount+' borrowers · '+r.counts.accountCount+' accounts';
   if (r.issues.length){
-    html += '<table><tr><th>Severity</th><th>Sheet</th><th>Row</th><th>Field</th><th>Message</th></tr>';
-    html += r.issues.map(i => '<tr><td class="sev-'+i.severity+'">'+i.severity+'</td><td>'+i.sheet+'</td><td>'+i.rowNumber+'</td><td>'+i.fieldKey+'</td><td>'+i.message+'</td></tr>').join('');
+    html += '<table><tr><th>Severity</th><th>Sheet</th><th>Row</th><th>Field</th><th>Message</th><th>Reference</th></tr>';
+    html += r.issues.map(i => '<tr><td class="sev-'+i.severity+'">'+i.severity+'</td><td>'+i.sheet+'</td><td>'+i.rowNumber+'</td><td>'+i.fieldKey+'</td><td>'+i.message+'</td><td>'+(i.reference||'')+'</td></tr>').join('');
     html += '</table>';
   }
   if (r.outputBase64){

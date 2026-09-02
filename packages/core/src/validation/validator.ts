@@ -28,6 +28,7 @@ export function validate(format: FormatSpec, borrowers: Borrower[]): ValidationR
       message:
         'No records found in the input. Check that the data is on the expected ' +
         'sheet with the correct column headers — nothing was read.',
+      reference: `${format.label} v${format.version} input workbook layout`,
       value: undefined,
     });
     return report;
@@ -39,7 +40,7 @@ export function validate(format: FormatSpec, borrowers: Borrower[]): ValidationR
       tagCounts.set(seg.tag, (tagCounts.get(seg.tag) ?? 0) + 1);
       const spec = specByTag.get(seg.tag);
       if (!spec) continue;
-      validateRow(report, spec, seg);
+      validateRow(report, format, spec, seg);
     }
     checkCardinality(report, format, borrower, tagCounts);
 
@@ -53,6 +54,7 @@ export function validate(format: FormatSpec, borrowers: Borrower[]): ValidationR
         fieldKey: '',
         rule: 'portal-mandatory',
         message,
+        reference: referenceFor(format, undefined, undefined, 'portal-mandatory', message),
         value: undefined,
       });
     }
@@ -61,7 +63,7 @@ export function validate(format: FormatSpec, borrowers: Borrower[]): ValidationR
   return report;
 }
 
-function validateRow(report: ValidationReport, spec: SegmentSpec, row: SegmentRow): void {
+function validateRow(report: ValidationReport, format: FormatSpec, spec: SegmentSpec, row: SegmentRow): void {
   // Surface issues raised while reading/mapping the row (e.g. an unmatched lookup).
   for (const ri of row.readerIssues ?? []) {
     report.add({
@@ -73,6 +75,7 @@ function validateRow(report: ValidationReport, spec: SegmentSpec, row: SegmentRo
       fieldKey: ri.fieldKey,
       rule: ri.rule ?? 'lookup',
       message: ri.message,
+      reference: ri.reference ?? referenceFor(format, spec, undefined, ri.rule ?? 'lookup', ri.message),
       value: row.values[ri.fieldKey],
       bypassable: ri.blocksBypass ? false : undefined,
     });
@@ -88,7 +91,7 @@ function validateRow(report: ValidationReport, spec: SegmentSpec, row: SegmentRo
 
     if (mandatory && !present) {
       const severity = field.mandatorySeverity ?? 'error';
-      report.add(issue(row, field, 'mandatory', severity, `Required field "${label(field)}" is blank`, value));
+      report.add(issue(format, spec, row, field, 'mandatory', severity, `Required field "${label(field)}" is blank`, value));
       continue;
     }
     if (!present) continue;
@@ -96,34 +99,34 @@ function validateRow(report: ValidationReport, spec: SegmentSpec, row: SegmentRo
     // enum membership
     if (field.enum && !(raw in field.enum)) {
       report.add(
-        issue(row, field, 'enum', 'error', `Value "${raw}" is not an allowed code for "${label(field)}"`, value),
+        issue(format, spec, row, field, 'enum', 'error', `Value "${raw}" is not an allowed code for "${label(field)}"`, value),
       );
     }
 
     // date parseability (coerce already tried; a leftover non-8-digit string fails)
     if ((field.type === 'date-ddmmyyyy' || field.type === 'date-ddmmccyy') && !/^\d{8}$/.test(raw)) {
-      report.add(issue(row, field, 'date', 'error', `Value "${raw}" is not a valid date (expected DDMMYYYY)`, value));
+      report.add(issue(format, spec, row, field, 'date', 'error', `Value "${raw}" is not a valid date (expected DDMMYYYY)`, value));
     }
 
     // format rules (PAN/PIN/phone/Aadhaar) keyed off field key
     const rule = formatRuleFor(field.key);
     if (rule && !rule(raw)) {
-      report.add(issue(row, field, 'format', 'error', `Value "${raw}" has an invalid format for "${label(field)}"`, value));
+      report.add(issue(format, spec, row, field, 'format', 'error', `Value "${raw}" has an invalid format for "${label(field)}"`, value));
     }
 
     // length: over-length is an error for fixed-width/coded; a warning-cap for pipe maxLength
     const cap = field.length ?? field.maxLength;
     if (spec.encoding !== 'pipe-delimited' && field.length && raw.length > field.length) {
       report.add(
-        issue(row, field, 'length', 'error', `Value "${raw}" exceeds fixed width ${field.length} for "${label(field)}"`, value),
+        issue(format, spec, row, field, 'length', 'error', `Value "${raw}" exceeds fixed width ${field.length} for "${label(field)}"`, value),
       );
     } else if (field.maxLength && raw.length > field.maxLength) {
       report.add(
-        issue(row, field, 'length', 'error', `Value length ${raw.length} exceeds max ${field.maxLength} for "${label(field)}"`, value),
+        issue(format, spec, row, field, 'length', 'error', `Value length ${raw.length} exceeds max ${field.maxLength} for "${label(field)}"`, value),
       );
     } else if (spec.encoding === 'coded-field' && raw.length > 99) {
       report.add(
-        issue(row, field, 'length', 'error', `Coded field "${label(field)}" value length ${raw.length} exceeds 99`, value),
+        issue(format, spec, row, field, 'length', 'error', `Coded field "${label(field)}" value length ${raw.length} exceeds 99`, value),
       );
     }
     void cap;
@@ -151,6 +154,7 @@ function checkCardinality(
         fieldKey: spec.tag,
         rule: 'cardinality',
         message: `Borrower ${borrower.acNo}: expected ${spec.cardinality} for segment ${spec.tag}, found ${n}`,
+        reference: referenceFor(format, spec, undefined, 'cardinality'),
         value: n,
       });
     }
@@ -162,6 +166,8 @@ function label(field: FieldSpec): string {
 }
 
 function issue(
+  format: FormatSpec,
+  spec: SegmentSpec,
   row: SegmentRow,
   field: FieldSpec,
   rule: ValidationIssue['rule'],
@@ -179,6 +185,45 @@ function issue(
     fieldLabel: field.label,
     rule,
     message,
+    reference: referenceFor(format, spec, field, rule),
     value,
   };
+}
+
+/**
+ * A human-readable source locator for the bureau rule that produced an issue.
+ * Keep this conservative: only cite a numbered V3.10 section where that section
+ * is recorded in the maintained bureau guidance; otherwise cite the exact format
+ * and segment/field layout instead of inventing a section number.
+ */
+function referenceFor(
+  format: FormatSpec,
+  spec?: SegmentSpec,
+  field?: FieldSpec,
+  rule?: ValidationIssue['rule'],
+  message?: string,
+): string {
+  const key = field?.key ?? '';
+  const tag = spec?.tag ?? '';
+  const commercialV310 = format.id === 'commercial-ucrf-v310' || format.id === 'commercial-ucrf-flat-v310';
+
+  if (commercialV310) {
+    if (rule === 'portal-mandatory' && /registered office/i.test(message ?? '')) {
+      return 'CRIF Commercial UCRF V3.10 §7.3 (Address Segment Rules); Catalogue 8.4 (Location Type)';
+    }
+    if (key === 'wilfulDefaultStatus' || key === 'wilfulDefaultDate' || /wilful default/i.test(message ?? '')) {
+      return 'CRIF Commercial UCRF V3.10 §7.5, CR fields 35–36 (Wilful Default Status and Date)';
+    }
+    if (key === 'stateCode' || key === 'rsStateCode' || key === 'gsStateCode' || rule === 'parse') {
+      return 'CRIF Commercial UCRF V3.10 Catalogue 8.6 (State/Union Territory codes)';
+    }
+    if (tag === 'HD') return 'CRIF Commercial UCRF V3.10 §7.1 (Header Segment)';
+    if (tag === 'AS') return 'CRIF Commercial UCRF V3.10 §7.3 (Address Segment Rules)';
+    if (tag === 'CR') return 'CRIF Commercial UCRF V3.10 §7.5 (Credit Facility Segment)';
+  }
+
+  const fieldText = field ? `, field “${label(field)}”` : '';
+  const segmentText = tag ? `, ${tag} segment` : '';
+  const formatName = format.label.includes(format.version) ? format.label : `${format.label} v${format.version}`;
+  return `${formatName}${segmentText}${fieldText} field layout`;
 }
