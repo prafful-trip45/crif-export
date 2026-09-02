@@ -890,8 +890,10 @@ function explode(
   if (input.address && !ba.stateCode) {
     issues.push({
       fieldKey: 'address',
-      severity: 'warning',
-      message: `Could not determine State Code from address "${input.address}". Ensure address includes a recognizable state name or 6-digit Indian PIN code.`,
+      severity: 'error',
+      rule: 'parse',
+      blocksBypass: true,
+      message: `Could not determine State Code from address "${input.address}". Add a recognized state name, CRIF state code, or a valid 6-digit Indian PIN code before generating the file.`,
     });
   }
 
@@ -942,8 +944,10 @@ function explode(
     if (input.relatedAddress && !ra.stateCode) {
       issues.push({
         fieldKey: 'relatedAddress',
-        severity: 'warning',
-        message: `Could not determine State Code from Related Person Address "${input.relatedAddress}". Ensure address includes a state name or 6-digit PIN code.`,
+        severity: 'error',
+        rule: 'parse',
+        blocksBypass: true,
+        message: `Could not determine State Code from Related Person Address "${input.relatedAddress}". Add a recognized state name, CRIF state code, or a valid 6-digit Indian PIN code before generating the file.`,
       });
     }
 
@@ -1063,6 +1067,18 @@ function explode(
     const ga = resolveAddress(gtor.address);
     const gtorPan = strNA(gtor.pan);
     const relPan = strNA(input.relatedPan);
+
+    // A guarantor address is parsed from the same Master Sheet row. Do not let a
+    // missing state code become a blank wire field that an operator can bypass.
+    if (gtor.address && !ga.stateCode) {
+      issues.push({
+        fieldKey: 'gsStateCode',
+        severity: 'error',
+        rule: 'parse',
+        blocksBypass: true,
+        message: `Could not determine State Code from Guarantor Address "${gtor.address}". Add a recognized state name, CRIF state code, or a valid 6-digit Indian PIN code before generating the file.`,
+      });
+    }
 
     // Cross-segment demographic consistency check: PAN vs DOB
     if (gtorPan && relPan && gtorPan === relPan) {
@@ -1191,6 +1207,7 @@ function resolveCreditType(
   if (code) return code;
   issues.push({
     fieldKey: 'creditType',
+    blocksBypass: true,
     message: `Credit Type "${s}" not found in the "Credit Type Code" lookup sheet — add it or correct the source value`,
   });
   return '';
@@ -1324,4 +1341,3 @@ export const commercialUcrfFlatV310: FormatSpec = {
     explode: (input, ctx) => explode(input, ctx, V310_OPTS),
   },
 };
-

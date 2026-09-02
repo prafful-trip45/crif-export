@@ -224,7 +224,14 @@ export interface SegmentSeed {
   flag: number;
   values: TypedRow;
   /** Issues raised while mapping (e.g. an unmatched lookup), surfaced in the report. */
-  issues?: Array<{ fieldKey: string; message: string }>;
+  issues?: Array<{
+    fieldKey: string;
+    message: string;
+    severity?: Severity;
+    rule?: 'lookup' | 'parse';
+    /** Prevent output even if the operator requests validation bypass. */
+    blocksBypass?: boolean;
+  }>;
 }
 
 /** Context handed to a flat-explode mapper (lookups read from auxiliary sheets, etc.). */

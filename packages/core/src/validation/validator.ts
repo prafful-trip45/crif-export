@@ -71,9 +71,10 @@ function validateRow(report: ValidationReport, spec: SegmentSpec, row: SegmentRo
       rowNumber: row.rowNumber,
       column: row.sourceColumns?.[ri.fieldKey],
       fieldKey: ri.fieldKey,
-      rule: 'lookup',
+      rule: ri.rule ?? 'lookup',
       message: ri.message,
       value: row.values[ri.fieldKey],
+      bypassable: ri.blocksBypass ? false : undefined,
     });
   }
 

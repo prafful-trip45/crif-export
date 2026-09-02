@@ -36,7 +36,13 @@ export async function convert(
   const report = validate(format, borrowers);
   const counts = computeCounts(format, borrowers);
 
-  if (!report.ok && !options.allowWarnings && !options.bypassErrors) {
+  // A parsing failure means the source value could not be translated safely. It
+  // must be corrected in the Master Sheet; bypass is only for ordinary bureau
+  // validation errors where the operator deliberately accepts the rejection risk.
+  if (
+    !report.ok &&
+    (report.hasNonBypassableErrors || (!options.allowWarnings && !options.bypassErrors))
+  ) {
     return { report, counts };
   }
 

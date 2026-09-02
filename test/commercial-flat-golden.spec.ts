@@ -286,4 +286,35 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
     expect(issue!.message).toMatch(/Credit Type "Loan" not found/);
     expect(result.output).toBeUndefined();
   });
+
+  it('reports every unresolved Master Sheet state up front and never bypasses those parsing errors', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Master Sheet');
+    ws.addRow([
+      "Borrower's Name", "Borrower's PAN", 'Borrowers Legal Constitution', 'Business Category',
+      'Business/ Industry Type', "Borrower's Address with PIN Code", "Borrower's Contact No.",
+      "Borrower's Account Number", 'Facility / Loan Activation / Sanction Date',
+      'Sanctioned Amount/ Notional Amount of Contract', 'Credit Type',
+      'Current Balance / Limit Utilized', 'Asset Classification', 'Account Status',
+    ]);
+    for (const name of ['First Ltd', 'Second Ltd']) {
+      ws.addRow([
+        name, 'AAAAA1111A', '30', '03', '06', 'Unit 7, Unknown Place', '9999999999', 'A1',
+        '01012024', '100000', '5000', '5000', '0001', '01',
+      ]);
+    }
+    const buffer = new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer).buffer;
+
+    const result = await convert(buffer, commercialUcrfFlat, META, {
+      allowWarnings: true,
+      bypassErrors: true,
+    });
+
+    const stateErrors = result.report.errors.filter(
+      (issue) => issue.rule === 'parse' && issue.fieldKey === 'address',
+    );
+    expect(stateErrors).toHaveLength(2);
+    expect(stateErrors.every((issue) => issue.bypassable === false)).toBe(true);
+    expect(result.output).toBeUndefined();
+  });
 });

@@ -6,6 +6,8 @@ export type ValidationRule =
   | 'cardinality'
   | 'date'
   | 'lookup'
+  /** The flat-sheet reader could not safely parse a source value. */
+  | 'parse'
   | 'empty-input'
   /** A cross-segment rule the bureau portal enforces on ingestion (e.g. every borrower
    * needs a Registered Office address) that the per-field walk can't express. */
@@ -32,6 +34,11 @@ export interface ValidationIssue {
   rule: ValidationRule;
   message: string;
   value: unknown;
+  /**
+   * False for errors where emitting a file would silently discard or corrupt a
+   * source value. These errors cannot be overridden with `bypassErrors`.
+   */
+  bypassable?: boolean;
 }
 
 export class ValidationReport {
@@ -52,6 +59,11 @@ export class ValidationReport {
   /** True when there are no blocking errors. */
   get ok(): boolean {
     return this.errors.length === 0;
+  }
+
+  /** Errors that must never be emitted, even when the operator selects bypass. */
+  get hasNonBypassableErrors(): boolean {
+    return this.errors.some((issue) => issue.bypassable === false);
   }
 }
 
