@@ -287,6 +287,97 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
     expect(result.output).toBeUndefined();
   });
 
+  it('rejects a date that is well-formed but not a real calendar date', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Master Sheet');
+    ws.addRow([
+      "Borrower's Name", "Borrower's PAN", 'Borrowers Legal Constitution', 'Business Category',
+      'Business/ Industry Type', "Borrower's Address with PIN Code", "Borrower's Contact No.",
+      "Borrower's Account Number", 'Facility / Loan Activation / Sanction Date',
+      'Sanctioned Amount/ Notional Amount of Contract', 'Credit Type',
+      'Current Balance / Limit Utilized', 'Asset Classification', 'Account Status',
+    ]);
+    // 31 February: eight digits, so a shape-only check passes it straight through to a
+    // Date field the bureau rejects (V3.10 §7.5 field 4, p.33).
+    ws.addRow([
+      'First Ltd', 'AAAAA1111A', '30', '03', '06', 'Rampur, Uttar Pradesh 244927', '9999999999',
+      'A1', '31022026', '100000', '5000', '5000', '0001', '01',
+    ]);
+    const buffer = new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer).buffer;
+    const result = await convert(buffer, commercialUcrfFlatV310, META, { allowWarnings: true });
+
+    const dateIssue = result.report.errors.find((i) => i.rule === 'date');
+    expect(dateIssue).toBeDefined();
+    expect(dateIssue!.message).toMatch(/not a real calendar date/);
+  });
+
+  it('caps Borrower Name at the 125 characters V3.10 allows', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Master Sheet');
+    ws.addRow([
+      "Borrower's Name", "Borrower's PAN", 'Borrowers Legal Constitution', 'Business Category',
+      'Business/ Industry Type', "Borrower's Address with PIN Code", "Borrower's Contact No.",
+      "Borrower's Account Number", 'Facility / Loan Activation / Sanction Date',
+      'Sanctioned Amount/ Notional Amount of Contract', 'Credit Type',
+      'Current Balance / Limit Utilized', 'Asset Classification', 'Account Status',
+    ]);
+    // V3.10 §7.2 field 4 (p.21): max 125, failure outcome "Reject record".
+    ws.addRow([
+      'A'.repeat(126), 'AAAAA1111A', '30', '03', '06', 'Rampur, Uttar Pradesh 244927',
+      '9999999999', 'A1', '01012024', '100000', '5000', '5000', '0001', '01',
+    ]);
+    const buffer = new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer).buffer;
+    const result = await convert(buffer, commercialUcrfFlatV310, META, { allowWarnings: true });
+
+    const lenIssue = result.report.errors.find((i) => i.fieldKey === 'borrowerName' && i.rule === 'length');
+    expect(lenIssue).toBeDefined();
+    expect(lenIssue!.message).toMatch(/exceeds max 125/);
+
+    // Exactly 125 is fine — the cap is inclusive.
+    const ok = new ExcelJS.Workbook();
+    const okWs = ok.addWorksheet('Master Sheet');
+    okWs.addRow((ws.getRow(1).values as unknown[]).slice(1));
+    okWs.addRow(['A'.repeat(125), ...(ws.getRow(2).values as unknown[]).slice(2)]);
+    const okBuf = new Uint8Array((await ok.xlsx.writeBuffer()) as ArrayBuffer).buffer;
+    const okResult = await convert(okBuf, commercialUcrfFlatV310, META, { allowWarnings: true });
+    expect(okResult.report.errors.filter((i) => i.fieldKey === 'borrowerName')).toHaveLength(0);
+  });
+
+  it('blames the State column, not the address, when the State cell holds an invalid code', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Master Sheet');
+    ws.addRow([
+      "Borrower's Name", "Borrower's PAN", 'Borrowers Legal Constitution', 'Business Category',
+      'Business/ Industry Type', "Borrower's Address with PIN Code", 'STATE CODE',
+      "Borrower's Contact No.", "Borrower's Account Number",
+      'Facility / Loan Activation / Sanction Date',
+      'Sanctioned Amount/ Notional Amount of Contract', 'Credit Type',
+      'Current Balance / Limit Utilized', 'Asset Classification', 'Account Status',
+    ]);
+    // The address resolves perfectly well on its own (Ghaziabad + PIN); only the
+    // explicit State cell is junk.
+    ws.addRow([
+      'First Ltd', 'AAAAA1111A', '30', '03', '06', 'No. 4, Ravi Kanta, Ghaziabad - 201002',
+      '99', '9999999999', 'A1', '01012024', '100000', '5000', '5000', '0001', '01',
+    ]);
+    const buffer = new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer).buffer;
+
+    const result = await convert(buffer, commercialUcrfFlatV310, META, {
+      allowWarnings: true,
+      bypassErrors: true,
+    });
+
+    // The finding names the State column and its bad value...
+    const stateIssue = result.report.errors.find((i) => i.fieldKey === 'stateCode');
+    expect(stateIssue).toBeDefined();
+    expect(stateIssue!.rule).toBe('enum');
+    expect(stateIssue!.message).toMatch(/State "99" is not a recognised/);
+
+    // ...and does NOT masquerade as an unparseable address, which would send the
+    // operator to a cell that is correct.
+    expect(result.report.issues.filter((i) => i.rule === 'parse')).toHaveLength(0);
+  });
+
   it('reports every unresolved Master Sheet state up front and never bypasses those parsing errors', async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Master Sheet');

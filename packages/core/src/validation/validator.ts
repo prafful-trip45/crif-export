@@ -104,8 +104,17 @@ function validateRow(report: ValidationReport, format: FormatSpec, spec: Segment
     }
 
     // date parseability (coerce already tried; a leftover non-8-digit string fails)
-    if ((field.type === 'date-ddmmyyyy' || field.type === 'date-ddmmccyy') && !/^\d{8}$/.test(raw)) {
-      report.add(issue(format, spec, row, field, 'date', 'error', `Value "${raw}" is not a valid date (expected DDMMYYYY)`, value));
+    if (field.type === 'date-ddmmyyyy' || field.type === 'date-ddmmccyy') {
+      if (!/^\d{8}$/.test(raw)) {
+        report.add(issue(format, spec, row, field, 'date', 'error', `Value "${raw}" is not a valid date (expected DDMMYYYY)`, value));
+      } else if (!isRealDate(raw)) {
+        // Shape alone is not enough: "31022026" is eight digits and passes the regex,
+        // but 31 February does not exist and the bureau rejects the record on a Date
+        // field. Check the day actually belongs to that month/year.
+        report.add(
+          issue(format, spec, row, field, 'date', 'error', `Value "${raw}" is not a real calendar date (DD/MM/YYYY)`, value),
+        );
+      }
     }
 
     // format rules (PAN/PIN/phone/Aadhaar) keyed off field key
@@ -159,6 +168,20 @@ function checkCardinality(
       });
     }
   }
+}
+
+/**
+ * True when a DDMMYYYY string names a date that actually exists. Round-tripping
+ * through Date catches the rollovers a regex cannot: 31 February, 31 April, and a
+ * 29 February outside a leap year all become a different day.
+ */
+function isRealDate(ddmmyyyy: string): boolean {
+  const day = Number(ddmmyyyy.slice(0, 2));
+  const month = Number(ddmmyyyy.slice(2, 4));
+  const year = Number(ddmmyyyy.slice(4, 8));
+  if (month < 1 || month > 12 || day < 1) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
 }
 
 function label(field: FieldSpec): string {

@@ -99,7 +99,8 @@ const BS: SegmentSpec = {
     tag('BS'), // 0
     opt('memberBranchCode', 'Member Branch Code'), // 1
     opt('prevMemberBranchCode', 'Previous Member Branch Code'), // 2
-    req('borrowerName', 'Borrower Name'), // 3
+    // V3.10 §7.2 field 4 (p.21): Required, max 125, failure outcome "Reject record".
+    req('borrowerName', 'Borrower Name', { maxLength: 125 }), // 3
     opt('borrowerShortName', 'Borrower Short Name'), // 4
     opt('bsReserved5', 'Reserved'), // 5 (empty in golden)
     date('dateOfIncorporation', 'Date of Incorporation'), // 6

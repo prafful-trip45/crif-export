@@ -228,7 +228,8 @@ export interface SegmentSeed {
     fieldKey: string;
     message: string;
     severity?: Severity;
-    rule?: 'lookup' | 'parse';
+    /** 'enum' covers a coded cell the reader read fine but whose value is off-catalogue. */
+    rule?: 'lookup' | 'parse' | 'enum';
     /** Bureau specification section, catalogue, or source layout behind this finding. */
     reference?: string;
     /** Prevent output even if the operator requests validation bypass. */

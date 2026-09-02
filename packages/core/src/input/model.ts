@@ -21,7 +21,8 @@ export interface SegmentRow {
     fieldKey: string;
     message: string;
     severity?: Severity;
-    rule?: 'lookup' | 'parse';
+    /** 'enum' covers a coded cell the reader read fine but whose value is off-catalogue. */
+    rule?: 'lookup' | 'parse' | 'enum';
     reference?: string;
     blocksBypass?: boolean;
   }>;

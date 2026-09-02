@@ -397,30 +397,52 @@ function resolveAddress(
   city?: FieldValue,
   state?: FieldValue,
   pin?: FieldValue,
-): { line1: string; city: string; stateName: string; stateCode: string; pinCode: string } {
+): {
+  line1: string;
+  city: string;
+  stateName: string;
+  stateCode: string;
+  pinCode: string;
+  /** The explicit State cell's value when it matched no catalogue name or code. */
+  unresolvedState?: string;
+} {
   const parsed = splitAddress(raw);
   let stateName = parsed.stateName;
-  let stateCode = parsed.stateCode;
+  const stateCode = parsed.stateCode;
+  let unresolvedState: string | undefined;
   const st = strNA(state);
   if (st !== '') {
     const byName = STATE_LOOKUP.find((x) => x.needle === st.toLowerCase());
     const byCode = (STATE_CODE as Record<string, string>)[st];
     if (byName) {
       stateName = byName.name;
-      stateCode = byName.code;
+      return { ...rest(parsed, city, pin), stateName, stateCode: byName.code };
     } else if (byCode) {
       stateName = byCode;
-      stateCode = st;
+      return { ...rest(parsed, city, pin), stateName, stateCode: st };
     } else {
+      // The explicit State cell holds something that is neither a catalogue name nor
+      // a valid code. Keep whatever the address text resolved to rather than blanking
+      // it: clearing `stateCode` here made a bad State cell surface as "could not
+      // determine State Code from address …", sending the operator to an address that
+      // was fine. The unrecognised value is reported against the State column itself
+      // by the caller.
       stateName = st;
-      stateCode = '';
+      unresolvedState = st;
     }
   }
+  return { ...rest(parsed, city, pin), stateName, stateCode, unresolvedState };
+}
+
+/** The address parts that do not depend on how the State cell resolved. */
+function rest(
+  parsed: { line1: string; city: string; pinCode: string },
+  city: FieldValue | undefined,
+  pin: FieldValue | undefined,
+): { line1: string; city: string; pinCode: string } {
   return {
     line1: parsed.line1,
     city: strNA(city) || parsed.city,
-    stateName,
-    stateCode,
     pinCode: strNA(pin) || parsed.pinCode,
   };
 }
@@ -901,6 +923,18 @@ function explode(
   const ba = resolveAddress(input.address, input.borrowerCity, input.borrowerState, input.borrowerPin);
   const userLocType = mapLegend(LOCATION_TYPE, input.locationType);
   const primaryLocType = userLocType || DEFAULTS.officeLocationType;
+
+  // An explicit State cell that matches no catalogue entry is reported against the
+  // State column itself — otherwise it only ever surfaced as a confusing "could not
+  // determine State Code from address", pointing at an address that was correct.
+  if (ba.unresolvedState) {
+    issues.push({
+      fieldKey: 'stateCode',
+      severity: 'error',
+      rule: 'enum',
+      message: `State "${ba.unresolvedState}" is not a recognised State/Union Territory. Use a name or 2-digit code from the CRIF State catalogue.`,
+    });
+  }
 
   // Address parsing validation
   if (input.address && !ba.stateCode) {
