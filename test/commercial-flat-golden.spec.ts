@@ -378,7 +378,12 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
     expect(result.report.issues.filter((i) => i.rule === 'parse')).toHaveLength(0);
   });
 
-  it('blocks an address PIN that does not belong to the selected State', async () => {
+  it.each([
+    ['Unit 4, Mumbai - 110001', '20', '', /PIN 110001.*New Delhi.*selected State is Maharashtra/],
+    ['Unit 4, Kochi - 682001', '18', '', /PIN 682001.*Kerala.*selected State is Lakshadweep/],
+    ['Unit 4, Delhi - 110999', '25', '', /PIN 110999 is not listed/],
+    ['Unit 4, Mumbai - 400001', '20', '110001', /PIN 110001.*New Delhi.*selected State is Maharashtra/],
+  ])('blocks a wrong or unlisted PIN (%s, state %s, explicit PIN %s)', async (address, state, pin, message) => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Master Sheet');
     ws.addRow([
@@ -388,11 +393,11 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
       'Facility / Loan Activation / Sanction Date',
       'Sanctioned Amount/ Notional Amount of Contract', 'Credit Type',
       'Current Balance / Limit Utilized', 'Asset Classification', 'Account Status',
+      "Borrower's PIN",
     ]);
-    // 110001 is a Delhi PIN, whereas the selected CRIF state is Maharashtra (20).
     ws.addRow([
-      'First Ltd', 'AAAAA1111A', '30', '03', '06', 'Unit 4, Mumbai - 110001',
-      '20', '9999999999', 'A1', '01012024', '100000', '5000', '5000', '0001', '01',
+      'First Ltd', 'AAAAA1111A', '30', '03', '06', address,
+      state, '9999999999', 'A1', '01012024', '100000', '5000', '5000', '0001', '01', pin,
     ]);
     const buffer = new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer).buffer;
 
@@ -401,11 +406,21 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
       bypassErrors: true,
     });
 
-    const issue = result.report.errors.find((item) => item.fieldKey === 'address' && item.rule === 'lookup');
+    const issue = result.report.errors.find((item) => item.fieldKey === (pin ? 'borrowerPin' : 'address') && item.rule === 'lookup');
     expect(issue).toBeDefined();
     expect(issue!.bypassable).toBe(false);
-    expect(issue!.message).toMatch(/PIN 110001.*New Delhi.*selected State is Maharashtra/);
+    expect(issue!.message).toMatch(message);
+    expect(issue!.column).toBe(pin ? 'P' : 'F');
+    expect(issue!.reference).toContain('Department of Posts');
     expect(result.output).toBeUndefined();
+
+    // Correcting the same cells restores successful conversion.
+    ws.getCell('F2').value = 'Unit 4, New Delhi - 110001';
+    ws.getCell('G2').value = '25';
+    ws.getCell('P2').value = '';
+    const fixed = await convert(new Uint8Array(await wb.xlsx.writeBuffer() as ArrayBuffer).buffer, commercialUcrfFlatV310, META);
+    expect(fixed.report.errors).toEqual([]);
+    expect(fixed.output).toBeDefined();
   });
 
   it('reports every unresolved Master Sheet state up front and never bypasses those parsing errors', async () => {

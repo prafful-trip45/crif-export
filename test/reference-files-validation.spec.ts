@@ -248,7 +248,15 @@ describe('reference-files pre-rollout validation', () => {
   // formatDdmmyyyy with "getUTCDate is not a function"), and B5 (a column header) must
   // NOT hijack the Member ID.
   it('does not crash when header-cell addresses land on data (member-id/date guard)', async () => {
-    const buf = readFileSync(ref('CIC Commercial Data Master Sheet.xlsx'));
+    // This fixture also has the invented PIN 568911. Replace it only in memory so
+    // this test continues to isolate the header-cell regression; the exact PIN
+    // directory tests assert that 568911 no longer invents a Karnataka state.
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(readFileSync(ref('CIC Commercial Data Master Sheet.xlsx')) as unknown as ArrayBuffer);
+    for (const ws of wb.worksheets) ws.eachRow(row => row.eachCell(cell => {
+      if (typeof cell.value === 'string') cell.value = cell.value.replace('568911', '560001');
+    }));
+    const buf = new Uint8Array(await wb.xlsx.writeBuffer() as ArrayBuffer).buffer;
     const meta: FileMeta = {
       memberId: 'NB51840001',
       reportingDate: new Date(Date.UTC(2026, 6, 7)), // 07072026
