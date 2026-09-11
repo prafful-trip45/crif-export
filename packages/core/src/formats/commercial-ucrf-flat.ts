@@ -593,6 +593,11 @@ function stateFromPin(pin: string): { code: string; name: string } | undefined {
     return { code: '33', name: 'Uttar Pradesh' };
   }
   if (p2 >= '30' && p2 <= '34') return { code: '29', name: 'Rajasthan' };
+  // The former Dadra and Nagar Haveli / Daman and Diu UT uses Gujarat's 396
+  // postal circle. These are the PINs used by the commercial master sheets and
+  // must be resolved before the broad Gujarat range below.
+  if (pin === '396210') return { code: '09', name: 'Daman and Diu' };
+  if (pin === '396230') return { code: '08', name: 'Dadra and Nagar Haveli and Daman and Diu' };
   if (p2 >= '36' && p2 <= '39') return { code: '11', name: 'Gujarat' };
   if (p3 === '403') return { code: '10', name: 'Goa' };
   if (p2 >= '40' && p2 <= '44') return { code: '20', name: 'Maharashtra' };
@@ -613,6 +618,11 @@ function stateFromPin(pin: string): { code: string; name: string } | undefined {
     return { code: '05', name: 'Bihar' };
   }
   return undefined;
+}
+
+/** Catalogue 08 is the post-merger UT entry; 09 remains accepted for legacy Daman and Diu sheets. */
+function samePostalState(left: string, right: string): boolean {
+  return left === right || (['08', '09'].includes(left) && ['08', '09'].includes(right));
 }
 
 /** Strip a trailing country word + a " - <PIN>" / " <PIN>" tail from a city token. */
@@ -944,6 +954,24 @@ function explode(
       rule: 'parse',
       blocksBypass: true,
       message: `Could not determine State Code from address "${input.address}". Add a recognized state name, CRIF state code, or a valid 6-digit Indian PIN code before generating the file.`,
+    });
+  }
+
+  // A State explicitly selected in the sheet takes precedence when we construct the
+  // AS segment, but it must still agree with the PIN written in the address cell.
+  // Previously `stateFromPin` was only a fallback for addresses without a State, so
+  // a Maharashtra selection with a Delhi PIN could be emitted without any finding.
+  // Do not infer a mismatch where state is only parsed from free text: postal-circle
+  // ranges have exceptional UT PINs and no operator selection is being contradicted.
+  const addressPin = splitAddress(input.address).pinCode;
+  const pinState = stateFromPin(addressPin);
+  if (strNA(input.borrowerState) && addressPin && pinState && ba.stateCode && !samePostalState(ba.stateCode, pinState.code)) {
+    issues.push({
+      fieldKey: 'address',
+      severity: 'error',
+      rule: 'lookup',
+      blocksBypass: true,
+      message: `PIN ${addressPin} in the address belongs to ${pinState.name} (State Code ${pinState.code}), but the selected State is ${ba.stateName} (State Code ${ba.stateCode}). Correct the PIN or selected State before generating the file.`,
     });
   }
 

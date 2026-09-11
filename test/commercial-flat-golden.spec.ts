@@ -378,6 +378,36 @@ describe('Commercial UCRF flat (Master Sheet) golden', () => {
     expect(result.report.issues.filter((i) => i.rule === 'parse')).toHaveLength(0);
   });
 
+  it('blocks an address PIN that does not belong to the selected State', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Master Sheet');
+    ws.addRow([
+      "Borrower's Name", "Borrower's PAN", 'Borrowers Legal Constitution', 'Business Category',
+      'Business/ Industry Type', "Borrower's Address with PIN Code", 'STATE CODE',
+      "Borrower's Contact No.", "Borrower's Account Number",
+      'Facility / Loan Activation / Sanction Date',
+      'Sanctioned Amount/ Notional Amount of Contract', 'Credit Type',
+      'Current Balance / Limit Utilized', 'Asset Classification', 'Account Status',
+    ]);
+    // 110001 is a Delhi PIN, whereas the selected CRIF state is Maharashtra (20).
+    ws.addRow([
+      'First Ltd', 'AAAAA1111A', '30', '03', '06', 'Unit 4, Mumbai - 110001',
+      '20', '9999999999', 'A1', '01012024', '100000', '5000', '5000', '0001', '01',
+    ]);
+    const buffer = new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer).buffer;
+
+    const result = await convert(buffer, commercialUcrfFlatV310, META, {
+      allowWarnings: true,
+      bypassErrors: true,
+    });
+
+    const issue = result.report.errors.find((item) => item.fieldKey === 'address' && item.rule === 'lookup');
+    expect(issue).toBeDefined();
+    expect(issue!.bypassable).toBe(false);
+    expect(issue!.message).toMatch(/PIN 110001.*New Delhi.*selected State is Maharashtra/);
+    expect(result.output).toBeUndefined();
+  });
+
   it('reports every unresolved Master Sheet state up front and never bypasses those parsing errors', async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Master Sheet');
