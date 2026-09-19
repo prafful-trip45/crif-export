@@ -5,6 +5,12 @@ export const PIN_RE = /^\d{6}$/;
 export const AADHAAR_RE = /^\d{12}$/;
 /** Indian mobile/landline: 10 digits, optionally with STD prefix — accept 6-15 digits. */
 export const PHONE_RE = /^\d{6,15}$/;
+/**
+ * Consumer UCRF-12 V3.73 EC/01: exactly one "@", at least one "." after it, no
+ * consecutive dots, and the domain may not begin or end with "-" or ".". CRIF
+ * rejects the whole EC segment when the address fails this.
+ */
+export const EMAIL_RE = /^[A-Za-z0-9.!#$%&'*+\-/=?^_`{|}~]+@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/;
 
 export function isPan(v: string): boolean {
   return PAN_RE.test(v);
@@ -18,6 +24,9 @@ export function isPhone(v: string): boolean {
 export function isAadhaar(v: string): boolean {
   return AADHAAR_RE.test(v);
 }
+export function isEmail(v: string): boolean {
+  return v.length <= 70 && !v.includes('..') && EMAIL_RE.test(v);
+}
 
 /** Map a field key to a known format-validator, or undefined if none applies. */
 export function formatRuleFor(key: string): ((v: string) => boolean) | undefined {
@@ -26,5 +35,6 @@ export function formatRuleFor(key: string): ((v: string) => boolean) | undefined
   if (k.includes('pincode') || k === 'pin') return isPin;
   if (k === 'uid' || k === 'aadhaar' || k === 'aadhar') return isAadhaar;
   if ((k.includes('mobile') || k.includes('phone') || k.includes('telephone')) && !k.includes('type')) return isPhone;
+  if (k === 'email' || k.startsWith('email')) return isEmail;
   return undefined;
 }

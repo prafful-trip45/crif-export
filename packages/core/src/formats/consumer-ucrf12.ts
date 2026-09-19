@@ -109,16 +109,30 @@ const PA: SegmentSpec = {
   ],
 };
 
-/** TL: Account / Trade Line Segment (TL04T00) */
+/**
+ * TL: Account / Trade Line Segment (TL04T001).
+ *
+ * NOTE the 4-character subtype: every other segment's tag is 3 chars (`N01`,
+ * `I01`, `T01`, `C01`, `A01`) but the spec requires `T001` for TL (V3.73 p.20,
+ * "Segment Tag ... F 04 ... Must contain the value T001"), making this segment
+ * header 8 bytes rather than 7. Field tag 01 is the Reporting Member Code (fixed
+ * 10) and must equal the member id in the TUDF header; tag 10 is Date Closed.
+ *
+ * Getting either wrong desynchronises the whole segment, and the two errors used
+ * to cancel out: `T00` + tag `10` + len `11` + `0`-prefixed id encodes to the same
+ * bytes as `T001` + tag `01` + len `10` + id. That coincidence held only while the
+ * member id was passed in 11 chars — with the real 10-char id the desktop app
+ * sends, CRIF reads tag 01 with length 00 and then hits garbage.
+ */
 const TL: SegmentSpec = {
   tag: 'TL',
   version: '04',
-  codedHeaderSuffix: 'T00',
+  codedHeaderSuffix: 'T001',
   encoding: 'coded-field',
   flag: 6,
   cardinality: 'many',
   fields: [
-    c('10', 'memberId', 'Member Short Name / ID', { mandatory: true }),
+    c('01', 'memberId', 'Current/New Reporting Member Code', { mandatory: true }),
     c('02', 'memberShortName', 'Member Short Name'),
     c('03', 'accountNumber', 'Account Number', { mandatory: true, maxLength: 30 }),
     c('04', 'accountType', 'Account Type'),
@@ -168,7 +182,9 @@ const TUDF: SegmentSpec = {
     fw('_recordType', 'Record Type', 4, { default: 'TUDF', mandatory: true }),
     fw('version', 'Version', 2, { default: '12', mandatory: true }),
     fw('memberId', 'Member / Processor User ID', 30, { mandatory: true }),
-    fw('memberShortName', 'Member Short Name', 16, { default: 'CRIFHIGH' }),
+    // No spec default: 'CRIFHIGH' is CRIF's own sample short name, and a default
+    // here shipped it in real headers whenever a form carried no header block.
+    fw('memberShortName', 'Member Short Name', 16),
     fw('cycleId', 'Cycle Identification', 2),
     { key: 'reportingDate', label: 'Date Reported & Certified', type: 'date-ddmmyyyy', length: 8, pad: 'right', padChar: ' ', mandatory: true },
     fw('password', 'Reporting Password', 30),
@@ -208,7 +224,52 @@ function splitConsumerAddress(rawAddr: string): { addressLine1: string; addressL
   };
 }
 
-/** Columns mapping for "Data Submission Form" flat sheet. */
+/**
+ * Header-text mapping for the "Data Submission Form": the row-10 label -> input key.
+ *
+ * Real accountant files come in at least three shapes — the canonical form (tab
+ * "Data Submission Form", labels on row 10), a form shifted up two rows on a
+ * "Sheet1" tab with "Address 1"/"Address 2" labels (consumer_input_failing.xlsx),
+ * and a bare export with labels on ROW 1 of a tab named "Consumer"
+ * (consumer-debugging-aug-14). Fixed column letters only fit the first; with
+ * labels the reader locates the header row and the data tab by content, and
+ * `CONSUMER_COLUMNS` below is just the fallback for a key no label matched.
+ * Labels are matched by folded prefix, so "Email ID 1" cannot bleed into "Email
+ * ID 2" and "Current/New Member Code" stays distinct from "...Member Short Name".
+ */
+const CONSUMER_COLUMN_HEADERS: Record<string, string> = {
+  'Consumer Name': 'consumerName',
+  'Date of Birth': 'dateOfBirth',
+  'Gender': 'gender',
+  'Income Tax ID Number': 'pan',
+  'Telephone No.Mobile': 'mobile',
+  'Email ID 1': 'email',
+  'Address Line 1': 'address',
+  'Address 1': 'address',
+  'State Code 1': 'stateCode',
+  'PIN Code 1': 'pinCode',
+  'Address Category 1': 'addressCategory',
+  'Residence Code 1': 'residenceCode',
+  'Current/New Member Code': 'memberCode',
+  'Current/New Member Short Name': 'memberShortName',
+  'Curr/New Account No': 'accountNumber',
+  'Account Type': 'accountType',
+  'Ownership Indicator': 'ownershipIndicator',
+  'Date Opened/Disbursed': 'dateOpened',
+  'Date of Last Payment': 'dateLastPayment',
+  'Date Reported': 'dateReported',
+  'High Credit/Sanctioned Amt': 'highCredit',
+  'Current Balance': 'currentBalance',
+  'Amt Overdue': 'amountOverdue',
+  'No of Days Past Due': 'daysPastDue',
+  'Suit Filed / Wilful Default': 'suitFiled',
+  'Asset Classification': 'assetClassification',
+  'Rate of Interest': 'rateOfInterest',
+  'RepaymentTenure': 'repaymentTenure',
+  'EMI Amount': 'emiAmount',
+};
+
+/** Fallback column letters for the canonical "Data Submission Form" layout. */
 const CONSUMER_COLUMNS: Record<string, string> = {
   A: 'consumerName',
   B: 'dateOfBirth',
@@ -253,6 +314,7 @@ export const consumerUcrf12: FormatSpec = {
     firstDataRow: 11,
     headerRow: 10,
     columns: CONSUMER_COLUMNS,
+    columnHeaders: CONSUMER_COLUMN_HEADERS,
     headerCells: {
       A6: 'memberName',
       B6: 'memberShortName',
@@ -336,14 +398,20 @@ export const consumerUcrf12: FormatSpec = {
         });
       }
 
-      // 4. EC: Email (optional)
-      seeds.push({
-        tag: 'EC',
-        flag: 4,
-        values: {
-          email: row.email ?? '',
-        },
-      });
+      // 4. EC: Email — a "When Available" segment (V3.73 p.14). With no email there
+      // is nothing to report, so the segment is omitted entirely; emitting a bare
+      // `EC03C01` with zero fields is what CRIF rejects as "field count issue in the
+      // EC Segment".
+      const email = String(row.email ?? '').trim();
+      if (email) {
+        seeds.push({
+          tag: 'EC',
+          flag: 4,
+          values: {
+            email,
+          },
+        });
+      }
 
       // 5. PA: Address
       seeds.push({
@@ -362,8 +430,12 @@ export const consumerUcrf12: FormatSpec = {
       });
 
       // 6. TL: Trade Line
+      // Member id: the CRIF-assigned id from the flag replaces the raw id the accountant
+      // typed (e.g. NB94430001 -> 024FP02726). Short name: no such translation exists,
+      // so the sheet's own value wins and the flag is only a fallback — the same
+      // precedence the header uses, so TL/02 and the TUDF header can never disagree.
       const memberCode = ctx.meta?.memberId || row.memberCode || '';
-      const memberShortName = ctx.meta?.memberShortName || row.memberShortName || '';
+      const memberShortName = row.memberShortName || ctx.meta?.memberShortName || '';
       seeds.push({
         tag: 'TL',
         flag: 6,
@@ -406,7 +478,9 @@ export const consumerUcrf12: FormatSpec = {
     _recordType: 'TUDF',
     version: '12',
     memberId: meta.memberId,
-    memberShortName: (meta.memberShortName as string) ?? 'CRIFHIGH',
+    // No invented default: 'CRIFHIGH' is the short name in CRIF's own sample file,
+    // and it shipped in real headers whenever a form's header block wasn't found.
+    memberShortName: (meta.memberShortName as string) ?? '',
     cycleId: (meta.cycleId as string) ?? '',
     reportingDate: formatDdmmyyyy(meta.reportingDate),
     password: meta.password ?? '',

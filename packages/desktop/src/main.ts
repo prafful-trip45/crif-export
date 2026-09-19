@@ -201,7 +201,20 @@ function setTheme(t: Theme) {
 // The legacy V3.9 commercial profile (`commercial-ucrf-flat`) is still registered in
 // the engine — it's the base the V3.10 profile is built from and several tests use it —
 // but only the current V3.10 commercial option is offered in the UI.
-const HIDDEN_FORMATS = new Set<FormatId>(['commercial-ucrf-flat', 'commercial-ucrf']);
+//
+// `consumer-ucrf12-flat` is withdrawn because it does not conform to the V3.73 spec.
+// It was reverse-engineered byte-exact from one client-supplied file: its header omits
+// the 2-byte Version field, so Date Reported lands at position 54 instead of the 55
+// the spec mandates (cf. CRIF's own SAMPLE_FILE_revised.txt), and its records are bare
+// concatenated values with no PN/ID/PT/PA/TL segment tags at all. It stays registered
+// so its golden tests keep guarding the engine, but consumers must use `consumer-tudf`,
+// which reads the same "Data Submission Form" sheet and emits the spec 146-byte header
+// plus tagged segments.
+const HIDDEN_FORMATS = new Set<FormatId>([
+  'commercial-ucrf-flat',
+  'commercial-ucrf',
+  'consumer-ucrf12-flat',
+]);
 
 function init() {
   setTheme((localStorage.getItem(THEME_STORE) as Theme) === 'light' ? 'light' : 'dark');
