@@ -186,6 +186,73 @@ describe('Consumer TUDF — Sept-2026 rejection regressions', () => {
     expect(parsed.memberCodes).toHaveLength(18);
   });
 
+  /**
+   * Rate of Interest (TL tag 38) and Suit Filed (tag 21) are "When Available"
+   * (V3.73 pp.29, 33). We used to mark both mandatory and tell the accountant to
+   * invent a rate. A blank now omits the tag with a warning; the file still
+   * generates without bypass. 0 is an explicit Reject-Field value.
+   */
+  it('omits tag 38 when Rate of Interest is blank, warns, and still generates', async () => {
+    // instance_1.xlsx: every row has ROI blank, Suit Filed = 00, DPD = 0, Asset = 01.
+    const res = await convert(xlsx(), getFormat('consumer-tudf'), meta); // no bypass
+    expect(res.report.errors).toEqual([]);
+    expect(res.output).toBeDefined();
+    const out = res.outputText!;
+    const tl = out.match(/TL04T001[^]*?(?=ES02\*\*)/g)!;
+    expect(tl).toHaveLength(18);
+    for (const seg of tl) {
+      expect(seg).not.toMatch(/38\d\d\d+\.\d/); // no rate, no tag
+      expect(seg).toMatch(/15010/); // DPD 0 reported as-is
+      expect(seg).toMatch(/210200/); // sheet's explicit "00 = No suit filed"
+      expect(seg).toMatch(/260201/); // sheet's own Asset Classification, not a default
+    }
+    const roiWarnings = res.report.warnings.filter((w) => w.fieldKey === 'rateOfInterest');
+    expect(roiWarnings).toHaveLength(18);
+    expect(roiWarnings[0]!.message).toMatch(/blank — omitted/);
+    expect(roiWarnings[0]!.message).toMatch(/do not enter 0/);
+  });
+
+  it('formats a rate as digits.digits and rejects 0', async () => {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(xlsx() as unknown as ArrayBuffer);
+    const ws = wb.getWorksheet('Data Submission Form')!;
+    ws.getCell('BG11').value = '12'; // -> 12.00 (CRIF's own sample shape)
+    ws.getCell('BG12').value = 12.5; // numeric cell -> 12.50
+    ws.getCell('BG13').value = '18.125'; // 3 decimals kept
+    ws.getCell('BG14').value = '0'; // Reject Field per spec -> our error
+    ws.getCell('BG15').value = '12%'; // stray % tolerated
+    ws.getCell('BB16').value = null; // Asset Classification blank, DPD present -> fine
+    const buf = Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+    const res = await convert(buf, getFormat('consumer-tudf'), meta, { bypassErrors: true });
+    const out = res.outputText!;
+    const tl = out.match(/TL04T001[^]*?(?=ES02\*\*)/g)!;
+    expect(tl[0]).toMatch(/380512\.00/);
+    expect(tl[1]).toMatch(/380512\.50/);
+    expect(tl[2]).toMatch(/380618\.125/);
+    expect(tl[3]).not.toMatch(/38\d\d\d/);
+    expect(tl[4]).toMatch(/380512\.00/);
+    expect(tl[5]).not.toMatch(/2602/); // not invented
+    expect(tl[5]).toMatch(/15010/);
+    const zero = res.report.errors.filter((e) => e.fieldKey === 'rateOfInterest');
+    expect(zero).toHaveLength(1);
+    expect(zero[0]!.rowNumber).toBe(14);
+    expect(zero[0]!.message).toMatch(/0, which CRIF rejects/);
+  });
+
+  it('blocks when neither Asset Classification nor Days Past Due is given', async () => {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(xlsx() as unknown as ArrayBuffer);
+    const ws = wb.getWorksheet('Data Submission Form')!;
+    ws.getCell('BB11').value = null;
+    ws.getCell('AT11').value = null;
+    const buf = Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+    const res = await convert(buf, getFormat('consumer-tudf'), meta);
+    const e = res.report.errors.filter((i) => i.fieldKey === 'assetClassification');
+    expect(e).toHaveLength(1);
+    expect(e[0]!.rowNumber).toBe(11);
+    expect(res.output).toBeUndefined();
+  });
+
   it('places Date Reported at header position 55 (CRIF header check)', async () => {
     const res = await convert(xlsx(), getFormat('consumer-tudf'), meta, { bypassErrors: true });
     const header = res.outputText!.slice(0, 146);

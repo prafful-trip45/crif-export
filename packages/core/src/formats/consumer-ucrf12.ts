@@ -143,9 +143,20 @@ const TL: SegmentSpec = {
     c('12', 'highCreditAmount', 'High Credit / Sanctioned Amount', { mandatory: true, type: 'numeric' }),
     c('13', 'currentBalance', 'Current Balance', { mandatory: true, type: 'numeric' }),
     c('14', 'amountOverdue', 'Amount Overdue', { type: 'numeric' }),
-    c('21', 'suitFiledStatus', 'Suit Filed / Wilful Default Status', { mandatory: true }),
-    c('26', 'assetClassification', 'Asset Classification', { mandatory: true }),
-    c('38', 'rateOfInterest', 'Rate of Interest', { mandatory: true, type: 'numeric' }),
+    // 15 and 26 are an either/or pair (V3.73 p.30): neither present -> Reject Record;
+    // both present -> Days Past Due takes precedence. The sheet always carries DPD
+    // (col AT, "0" for a current account), so 26 is required only when 15 is absent.
+    c('15', 'daysPastDue', 'Number of Days Past Due', { type: 'numeric' }),
+    // "When Available" (p.29): required only if the account has actually been
+    // classified (suit filed / wilful default). A blank means not classified.
+    c('21', 'suitFiledStatus', 'Suit Filed / Wilful Default Status'),
+    c('26', 'assetClassification', 'Asset Classification', {
+      mandatory: (v) => v.daysPastDue === undefined || v.daysPastDue === null || String(v.daysPastDue).trim() === '',
+    }),
+    // "When Available" (p.33): omitted when the accountant has no rate. Never
+    // invented, never 0.0 (an explicit Reject-Field value). Pre-formatted by the
+    // explode as digits.digits, e.g. "12.00", the shape CRIF's own sample uses.
+    c('38', 'rateOfInterest', 'Rate of Interest'),
     c('39', 'repaymentTenure', 'Repayment Tenure'),
   ],
 };
@@ -344,19 +355,67 @@ export const consumerUcrf12: FormatSpec = {
         });
       }
 
-      const tlIssues: Array<{ fieldKey: string; message: string }> = [];
-      if (!row.suitFiled || String(row.suitFiled).trim() === '') {
+      const tlIssues: NonNullable<SegmentSeed['issues']> = [];
+
+      // Suit Filed (tag 21) is "When Available": a blank is a legitimate "not
+      // classified", so it is omitted, not blocked — but say so, because a suit or
+      // wilful default that IS known must be reported.
+      const suitFiled = row.suitFiled ? String(row.suitFiled).trim() : '';
+      if (!suitFiled) {
         tlIssues.push({
           fieldKey: 'suitFiled',
-          message: 'Mandatory field "Suit Filed / Wilful Default" (Column AZ) is blank. Fill "00" (No Suit Filed) to prevent CRIF portal rejection.',
+          severity: 'warning',
+          message: 'Suit Filed / Wilful Default (Column AZ) is blank — omitted (not classified). Enter 00 to state "No suit filed" explicitly, or 01/02/03 if a suit or wilful default exists.',
+          reference: 'Consumer UCRF-12 V3.73 §TL tag 21 (When Available), p.29',
         });
       }
-      if (!row.rateOfInterest || String(row.rateOfInterest).trim() === '') {
+
+      // Rate of Interest (tag 38) is "When Available". Blank -> the tag is omitted;
+      // never substitute a number. 0 is an explicit Reject-Field value, and the
+      // format is digits.digits with at most 4 before / 3 after the point.
+      const roiRaw = row.rateOfInterest === undefined || row.rateOfInterest === null ? '' : String(row.rateOfInterest).trim().replace(/%$/, '').trim();
+      let rateOfInterest = '';
+      if (!roiRaw) {
         tlIssues.push({
           fieldKey: 'rateOfInterest',
-          message: 'Mandatory field "Rate of Interest" (Column BG) is blank. Fill sanctioned interest rate to prevent CRIF portal rejection.',
+          severity: 'warning',
+          message: 'Rate of Interest (Column BG) is blank — omitted. Leave it blank until the client supplies the sanctioned rate; do not enter 0.',
+          reference: 'Consumer UCRF-12 V3.73 §TL tag 38 (When Available), p.33',
         });
+      } else if (!/^\d+(\.\d+)?$/.test(roiRaw)) {
+        tlIssues.push({
+          fieldKey: 'rateOfInterest',
+          rule: 'parse',
+          message: `Rate of Interest "${roiRaw}" is not a number. Enter the annual rate as digits, e.g. 12 or 12.5, without the % sign.`,
+          reference: 'Consumer UCRF-12 V3.73 §TL tag 38, p.33',
+        });
+      } else {
+        const [intPart, decPart = ''] = roiRaw.split('.');
+        if (Number(roiRaw) === 0) {
+          tlIssues.push({
+            fieldKey: 'rateOfInterest',
+            rule: 'enum',
+            message: 'Rate of Interest is 0, which CRIF rejects (Reject Field). Leave the cell blank if the rate is not known.',
+            reference: 'Consumer UCRF-12 V3.73 §TL tag 38, p.33',
+          });
+        } else if (intPart!.replace(/^0+(?=\d)/, '').length > 4) {
+          tlIssues.push({
+            fieldKey: 'rateOfInterest',
+            rule: 'parse',
+            message: `Rate of Interest "${roiRaw}" has more than 4 digits before the decimal point.`,
+            reference: 'Consumer UCRF-12 V3.73 §TL tag 38, p.33',
+          });
+        } else {
+          rateOfInterest = `${intPart!.replace(/^0+(?=\d)/, '')}.${decPart.slice(0, 3).padEnd(2, '0')}`;
+        }
       }
+
+      // Days Past Due (tag 15): reported as-is, 0 for a current account, capped at
+      // 900 as the spec instructs. It pairs with Asset Classification (tag 26):
+      // at least one must be present, and DPD takes precedence when both are.
+      const dpdRaw = row.daysPastDue === undefined || row.daysPastDue === null ? '' : String(row.daysPastDue).trim();
+      const daysPastDue = /^\d+$/.test(dpdRaw) ? String(Math.min(Number(dpdRaw), 900)) : '';
+      const assetClassification = row.assetClassification ? String(row.assetClassification).trim() : '';
 
       const seeds: SegmentSeed[] = [];
 
@@ -451,9 +510,10 @@ export const consumerUcrf12: FormatSpec = {
           highCreditAmount: row.highCredit,
           currentBalance: row.currentBalance,
           amountOverdue: row.amountOverdue && String(row.amountOverdue) !== '0' ? row.amountOverdue : '',
-          suitFiledStatus: row.suitFiled ? String(row.suitFiled).trim() : '',
-          assetClassification: row.assetClassification ? String(row.assetClassification).trim() : '01',
-          rateOfInterest: row.rateOfInterest ? String(row.rateOfInterest).trim() : '',
+          daysPastDue,
+          suitFiledStatus: suitFiled,
+          assetClassification,
+          rateOfInterest,
           repaymentTenure: row.repaymentTenure,
         },
         issues: tlIssues.length > 0 ? tlIssues : undefined,

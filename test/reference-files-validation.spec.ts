@@ -311,9 +311,12 @@ describe('reference-files pre-rollout validation', () => {
    *
    * Three real layouts are covered: the canonical form (labels row 10), the form
    * shifted to a "Sheet1" tab (labels row 8, "Address 1"), and a bare export with
-   * labels on ROW 1 of a "Consumer" tab. Files with known data defects (blank Rate
-   * of Interest / Suit Filed) convert under bypass — the defects are the
-   * accountant's, the encoding is ours, and only the encoding is on trial here.
+   * labels on ROW 1 of a "Consumer" tab.
+   *
+   * Blank Rate of Interest / Suit Filed are NOT defects: both are "When Available"
+   * (V3.73 pp.29, 33) and are simply omitted, with a warning. Two of these files
+   * have every rate blank and must still convert with zero errors — we used to
+   * block them and tell the accountant to invent a rate.
    */
   describe('consumer-tudf: every real workbook encodes to a stream CRIF can parse', () => {
     const HDR: Record<string, number> = { PN: 7, ID: 7, PT: 7, EC: 7, PA: 7, TL: 8 };
@@ -355,13 +358,13 @@ describe('reference-files pre-rollout validation', () => {
       reportingDate: new Date(Date.UTC(2026, 8, 9)),
       creationDate: new Date(Date.UTC(2026, 8, 15)),
     };
-    type TudfCase = { file: string; subjects: number; layout: string; dataDefects?: string[]; emails?: boolean; sheetReportingDate?: string };
+    type TudfCase = { file: string; subjects: number; layout: string; dataDefects?: string[]; emails?: boolean; sheetReportingDate?: string; roiBlank?: boolean };
     const CASES: TudfCase[] = [
       { file: 'crif-reporting-io/client-input-consumer-input-1.xlsx', subjects: 2, layout: 'canonical', sheetReportingDate: '15042026' },
       { file: 'crif-reporting-io/consumer-input-2.xlsx', subjects: 37, layout: 'canonical', sheetReportingDate: '31052026' },
       { file: 'crif-reporting-io/consumer_input_failing.xlsx', subjects: 7, layout: 'Sheet1, shifted up two rows, "Address 1"', emails: true, sheetReportingDate: '15012026' },
-      { file: 'consumer-debugging-Aug-26/024FP04147_16082026_17082026_145520.xlsx', subjects: 17, layout: 'canonical', dataDefects: ['suitFiled', 'suitFiledStatus', 'rateOfInterest'], sheetReportingDate: '16082026' },
-      { file: 'consumer-debugging-sept-19/instance_1.xlsx', subjects: 18, layout: 'canonical (rejected 19-Sep: bare EC)', dataDefects: ['rateOfInterest'] },
+      { file: 'consumer-debugging-Aug-26/024FP04147_16082026_17082026_145520.xlsx', subjects: 17, layout: 'canonical, no ROI and no Suit Filed on any row', sheetReportingDate: '16082026', roiBlank: true },
+      { file: 'consumer-debugging-sept-19/instance_1.xlsx', subjects: 18, layout: 'canonical (rejected 19-Sep: bare EC), no ROI on any row', roiBlank: true },
       { file: 'consumer-debugging-sept-19/instance_2.xlsx', subjects: 48, layout: 'canonical, every row has an email', emails: true },
       { file: 'consumer-debugging-aug-14/NBF0001828_09072026_14082026_W1 (1).xlsx', subjects: 3, layout: '"Consumer" tab, labels on row 1, no header block' },
       { file: 'consumer-debugging-aug-14/NBF0001828_15062026_14082026_W2 (1).xlsx', subjects: 3, layout: '"Consumer" tab, labels on row 1, no header block' },
@@ -406,6 +409,14 @@ describe('reference-files pre-rollout validation', () => {
         expect(parsed.segs.TL).toBe(c.subjects);
         // EC is "When Available": present for every subject only when the sheet has emails.
         expect(parsed.segs.EC ?? 0).toBe(c.emails ? c.subjects : 0);
+        // Rate of Interest is "When Available": a blank sheet cell means NO tag 38 —
+        // never a substituted number — and the file still generates.
+        const tl38 = (out.match(/TL04T001[^]*?(?=ES02\*\*)/g) ?? []).filter((seg) => /(?:^|\d\d)38\d\d\d+\.\d/.test(seg)).length;
+        if (c.roiBlank) expect(tl38).toBe(0);
+        else expect(tl38).toBe(c.subjects);
+        // Days Past Due (tag 15) pairs with Asset Classification: the sheet always
+        // carries it, so every account reports it and nothing is invented for 26.
+        expect(parsed.segs.TL).toBe(c.subjects);
         // TL/01 is the 10-char member code and equals the header member id on every account.
         expect(parsed.tl01).toHaveLength(c.subjects);
         expect(new Set(parsed.tl01)).toEqual(new Set([MEMBER]));
