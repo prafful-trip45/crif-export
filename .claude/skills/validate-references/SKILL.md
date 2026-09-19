@@ -69,7 +69,21 @@ A manifest (`CHECKS`) drives three kinds of assertion:
 
 ## Notes
 
-- Only the **flat** consumer profile (`consumer-ucrf12-flat`) is shipped; the
-  TLV profile was removed because it mapped columns by fixed letters and broke on
-  files whose layout differed. Keep the manifest pointed at flat/commercial/MFI.
-- This gate is conversion-only and runs in ~2s; there is no reason to skip it.
+- **`consumer-tudf` is the consumer profile customers submit** (spec V3.73:
+  146-byte header, tagged PN/ID/PT/EC/PA/TL segments, `ES02**`, `TRLR`). It maps
+  the "Data Submission Form" by header TEXT (`columnHeaders`), so the shifted
+  "Sheet1" form and the row-1 "Consumer" export both resolve; fixed letters are
+  only the fallback.
+- `consumer-ucrf12-flat` is **hidden from the desktop app** (`HIDDEN_FORMATS`):
+  it was reverse-engineered from a client file that is not a conforming UCRF-12
+  submission (no Version field, Date Reported at 54 not 55, untagged records).
+  It stays registered only so its goldens keep guarding the reader.
+- A byte-exact golden proves the engine reproduces a file, not that the file
+  parses. The `consumer-tudf` block walks every real consumer workbook as a
+  spec-compliant reader would and must reach `TRLR` — that is what caught the
+  Sept-2026 TL desync (`T00` + tag `10` vs the spec's `T001` + tag `01`).
+- Consumer workbooks live in several `training-references/` folders, not just
+  `crif-reporting-io/`; the `tref()` helper addresses them. Add a new consumer
+  file to `CASES` in the `consumer-tudf` block with its subject count, layout
+  note, and any known accountant data defects.
+- This gate is conversion-only and runs in ~5s; there is no reason to skip it.

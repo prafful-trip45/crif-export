@@ -263,8 +263,14 @@ export async function readFlatHeaderOverrides(
 
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as ArrayBuffer);
-  const ws = format.flatInput ? resolveSheet(wb, sheet) : findSheet(wb, sheet);
+  // Flat-explode forms on a renamed tab ("Sheet1", "Consumer") are located by
+  // content, exactly as the row reader does; the fixed cell addresses are then
+  // meaningless (they were laid out for the canonical tab), so only the detected
+  // header block below is consulted for such a sheet.
+  const named = findSheet(wb, sheet);
+  const ws = named ?? (format.flatInput ? resolveSheet(wb, sheet) : format.flatExplode ? resolveFlatExplodeSheet(wb, format.flatExplode) : undefined);
   if (!ws) return {};
+  const useFixedCells = Boolean(named) || Boolean(format.flatInput);
 
   const out: Record<string, FieldValue> = {};
   const set = (key: string, v: FieldValue): void => {
@@ -285,7 +291,7 @@ export async function readFlatHeaderOverrides(
   // block (label in column A). Guard the member-id override with its adjacent label so a
   // shifted/expanded template (where B5 is a data column header like "Borrower's PAN")
   // doesn't hijack the Member ID.
-  for (const [addr, key] of Object.entries(cells ?? {})) {
+  for (const [addr, key] of Object.entries(useFixedCells ? cells ?? {} : {})) {
     if (key === 'memberId') {
       const row = /\d+/.exec(addr)?.[0];
       const label = row ? String(cellRaw(ws.getCell(`A${row}`)) ?? '') : '';
@@ -298,7 +304,7 @@ export async function readFlatHeaderOverrides(
   // form's TUDF header block (label row + value row directly below) by its known
   // CRIF column labels. Handles forms shifted left/up where the configured cell
   // addresses no longer line up.
-  if (format.flatInput) {
+  if (format.flatInput || format.flatExplode) {
     for (const [key, v] of Object.entries(detectFlatHeaderValues(ws))) {
       if (!(key in out)) set(key, v);
     }
@@ -315,6 +321,8 @@ export async function readFlatHeaderOverrides(
  */
 const FLAT_HEADER_LABEL_TO_META: Record<string, string> = {
   'short name': 'memberShortName',
+  'reporting cycle': 'cycleId',
+  'cycle identification': 'cycleId',
   'date reported': 'reportingDate',
   'reporting password': 'password',
 };
@@ -342,7 +350,11 @@ function detectFlatHeaderValues(ws: ExcelJS.Worksheet): Record<string, FieldValu
     });
     if (score > best.score) best = { row: r, score };
   }
-  if (best.score === 0) return {};
+  // A genuine TUDF header block names several of these on one row. A single hit is
+  // just the account block's own "Date Reported" column on a bare export (labels on
+  // row 1, no header block at all) — reading the row beneath it would take one
+  // account's date as the file's; leave the flags in charge instead.
+  if (best.score < 2) return {};
 
   const metaByCol = new Map<number, string>();
   ws.getRow(best.row).eachCell({ includeEmpty: false }, (cell, col) => {

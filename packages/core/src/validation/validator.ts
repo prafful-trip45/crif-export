@@ -104,8 +104,17 @@ function validateRow(report: ValidationReport, format: FormatSpec, spec: Segment
     }
 
     // date parseability (coerce already tried; a leftover non-8-digit string fails)
-    if ((field.type === 'date-ddmmyyyy' || field.type === 'date-ddmmccyy') && !/^\d{8}$/.test(raw)) {
-      report.add(issue(format, spec, row, field, 'date', 'error', `Value "${raw}" is not a valid date (expected DDMMYYYY)`, value));
+    if (field.type === 'date-ddmmyyyy' || field.type === 'date-ddmmccyy') {
+      if (!/^\d{8}$/.test(raw)) {
+        report.add(issue(format, spec, row, field, 'date', 'error', `Value "${raw}" is not a valid date (expected DDMMYYYY)`, value));
+      } else if (!isRealDate(raw)) {
+        // Shape alone is not enough: "31022026" is eight digits and passes the regex,
+        // but 31 February does not exist and the bureau rejects the record on a Date
+        // field. Check the day actually belongs to that month/year.
+        report.add(
+          issue(format, spec, row, field, 'date', 'error', `Value "${raw}" is not a real calendar date (DD/MM/YYYY)`, value),
+        );
+      }
     }
 
     // format rules (PAN/PIN/phone/Aadhaar) keyed off field key
@@ -114,22 +123,25 @@ function validateRow(report: ValidationReport, format: FormatSpec, spec: Segment
       report.add(issue(format, spec, row, field, 'format', 'error', `Value "${raw}" has an invalid format for "${label(field)}"`, value));
     }
 
-    // length: over-length is an error for fixed-width/coded; a warning-cap for pipe maxLength
-    const cap = field.length ?? field.maxLength;
+    // length: over-length is an error for fixed-width/coded; a warning-cap for pipe maxLength.
+    // A coded-field value is written as [tag][len(2)][value], so anything past 99 bytes
+    // has no representation at all — the encoder would emit a 3-digit length and every
+    // byte after it would be read out of phase. That is not a bureau-rule error the
+    // operator can choose to accept with --bypass-errors; it is unencodable, so it blocks.
+    // (Seen on consumer_input_failing.xlsx: a 106-char address under a mis-mapped
+    // state-code column produced `06106S/O Nareshkumar...` and corrupted the stream.)
+    const unencodable = spec.encoding === 'coded-field' && raw.length > 99;
+    const lengthIssue = (message: string): ValidationIssue => ({
+      ...issue(format, spec, row, field, 'length', 'error', message, value),
+      ...(unencodable ? { bypassable: false } : {}),
+    });
     if (spec.encoding !== 'pipe-delimited' && field.length && raw.length > field.length) {
-      report.add(
-        issue(format, spec, row, field, 'length', 'error', `Value "${raw}" exceeds fixed width ${field.length} for "${label(field)}"`, value),
-      );
+      report.add(lengthIssue(`Value "${raw}" exceeds fixed width ${field.length} for "${label(field)}"`));
     } else if (field.maxLength && raw.length > field.maxLength) {
-      report.add(
-        issue(format, spec, row, field, 'length', 'error', `Value length ${raw.length} exceeds max ${field.maxLength} for "${label(field)}"`, value),
-      );
-    } else if (spec.encoding === 'coded-field' && raw.length > 99) {
-      report.add(
-        issue(format, spec, row, field, 'length', 'error', `Coded field "${label(field)}" value length ${raw.length} exceeds 99`, value),
-      );
+      report.add(lengthIssue(`Value length ${raw.length} exceeds max ${field.maxLength} for "${label(field)}"`));
+    } else if (unencodable) {
+      report.add(lengthIssue(`Coded field "${label(field)}" value length ${raw.length} exceeds 99`));
     }
-    void cap;
   }
 }
 
@@ -159,6 +171,20 @@ function checkCardinality(
       });
     }
   }
+}
+
+/**
+ * True when a DDMMYYYY string names a date that actually exists. Round-tripping
+ * through Date catches the rollovers a regex cannot: 31 February, 31 April, and a
+ * 29 February outside a leap year all become a different day.
+ */
+function isRealDate(ddmmyyyy: string): boolean {
+  const day = Number(ddmmyyyy.slice(0, 2));
+  const month = Number(ddmmyyyy.slice(2, 4));
+  const year = Number(ddmmyyyy.slice(4, 8));
+  if (month < 1 || month > 12 || day < 1) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
 }
 
 function label(field: FieldSpec): string {

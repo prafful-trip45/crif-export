@@ -29,6 +29,8 @@ import type { FileMeta, FormatId } from '../packages/core/src/core/types.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const REF = join(here, '..', 'training-references', 'crif-reporting-io');
 const ref = (f: string) => join(REF, f);
+/** A reference anywhere under training-references/ (the debugging folders). */
+const tref = (f: string) => join(here, '..', 'training-references', f);
 
 type Check =
   | { kind: 'golden'; input: string; output: string; format: FormatId; meta: FileMeta }
@@ -248,7 +250,15 @@ describe('reference-files pre-rollout validation', () => {
   // formatDdmmyyyy with "getUTCDate is not a function"), and B5 (a column header) must
   // NOT hijack the Member ID.
   it('does not crash when header-cell addresses land on data (member-id/date guard)', async () => {
-    const buf = readFileSync(ref('CIC Commercial Data Master Sheet.xlsx'));
+    // This fixture also has the invented PIN 568911. Replace it only in memory so
+    // this test continues to isolate the header-cell regression; the exact PIN
+    // directory tests assert that 568911 no longer invents a Karnataka state.
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(readFileSync(ref('CIC Commercial Data Master Sheet.xlsx')) as unknown as ArrayBuffer);
+    for (const ws of wb.worksheets) ws.eachRow(row => row.eachCell(cell => {
+      if (typeof cell.value === 'string') cell.value = cell.value.replace('568911', '560001');
+    }));
+    const buf = new Uint8Array(await wb.xlsx.writeBuffer() as ArrayBuffer).buffer;
     const meta: FileMeta = {
       memberId: 'NB51840001',
       reportingDate: new Date(Date.UTC(2026, 6, 7)), // 07072026
@@ -291,6 +301,152 @@ describe('reference-files pre-rollout validation', () => {
     }
   });
 
+  /**
+   * --- CONSUMER TUDF (the profile customers actually submit) ---
+   * Byte-goldens prove we can reproduce a file; they never proved a file PARSES.
+   * The Sept-2026 rejections came from a stream that byte-matched a client golden
+   * yet desynchronised at the first TL segment. So every real consumer workbook is
+   * walked here exactly as a spec-compliant reader walks it (self-describing
+   * [tag][len][value] after 7-byte headers, 8 bytes for TL), and must reach TRLR.
+   *
+   * Three real layouts are covered: the canonical form (labels row 10), the form
+   * shifted to a "Sheet1" tab (labels row 8, "Address 1"), and a bare export with
+   * labels on ROW 1 of a "Consumer" tab.
+   *
+   * Blank Rate of Interest / Suit Filed are NOT defects: both are "When Available"
+   * (V3.73 pp.29, 33) and are simply omitted, with a warning. Two of these files
+   * have every rate blank and must still convert with zero errors — we used to
+   * block them and tell the accountant to invent a rate.
+   */
+  describe('consumer-tudf: every real workbook encodes to a stream CRIF can parse', () => {
+    const HDR: Record<string, number> = { PN: 7, ID: 7, PT: 7, EC: 7, PA: 7, TL: 8 };
+    const VER: Record<string, string> = { PN: '03', ID: '03', PT: '03', EC: '03', PA: '03', TL: '04' };
+    const crifParse = (out: string) => {
+      let i = 146;
+      const tl01: string[] = [];
+      let subjects = 0;
+      const segs: Record<string, number> = {};
+      while (i < out.length) {
+        if (out.startsWith('ES02**', i)) { i += 6; subjects++; continue; }
+        if (out.startsWith('TRLR', i)) return { ok: true, subjects, tl01, segs };
+        const tag = out.slice(i, i + 2);
+        const w = HDR[tag];
+        if (!w) return { ok: false, at: i, saw: out.slice(i, i + 16), subjects, tl01, segs };
+        segs[tag] = (segs[tag] ?? 0) + 1;
+        i += w;
+        while (i < out.length) {
+          if (out.startsWith('ES02**', i) || out.startsWith('TRLR', i)) break;
+          const nt = out.slice(i, i + 2);
+          if (HDR[nt] && out.slice(i + 2, i + 4) === VER[nt]) break;
+          const ft = out.slice(i, i + 2);
+          const ln = out.slice(i + 2, i + 4);
+          if (!/^\d\d$/.test(ft) || !/^\d\d$/.test(ln)) {
+            return { ok: false, at: i, saw: out.slice(i, i + 16), subjects, tl01, segs };
+          }
+          if (tag === 'TL' && ft === '01') tl01.push(out.slice(i + 4, i + 4 + Number(ln)));
+          i += 4 + Number(ln);
+        }
+      }
+      return { ok: false, at: i, saw: '<eof>', subjects, tl01, segs };
+    };
+
+    const MEMBER = '024FP04147';
+    // Mirrors the desktop app: it passes the member id and dates, never a short name
+    // or cycle — those come from the form's header block or, failing that, its rows.
+    const META: FileMeta = {
+      memberId: MEMBER,
+      reportingDate: new Date(Date.UTC(2026, 8, 9)),
+      creationDate: new Date(Date.UTC(2026, 8, 15)),
+    };
+    type TudfCase = { file: string; subjects: number; layout: string; dataDefects?: string[]; emails?: boolean; sheetReportingDate?: string; roiBlank?: boolean };
+    const CASES: TudfCase[] = [
+      { file: 'crif-reporting-io/client-input-consumer-input-1.xlsx', subjects: 2, layout: 'canonical', sheetReportingDate: '15042026' },
+      { file: 'crif-reporting-io/consumer-input-2.xlsx', subjects: 37, layout: 'canonical', sheetReportingDate: '31052026' },
+      { file: 'crif-reporting-io/consumer_input_failing.xlsx', subjects: 7, layout: 'Sheet1, shifted up two rows, "Address 1"', emails: true, sheetReportingDate: '15012026' },
+      { file: 'consumer-debugging-Aug-26/024FP04147_16082026_17082026_145520.xlsx', subjects: 17, layout: 'canonical, no ROI and no Suit Filed on any row', sheetReportingDate: '16082026', roiBlank: true },
+      { file: 'consumer-debugging-sept-19/instance_1.xlsx', subjects: 18, layout: 'canonical (rejected 19-Sep: bare EC), no ROI on any row', roiBlank: true },
+      { file: 'consumer-debugging-sept-19/instance_2.xlsx', subjects: 48, layout: 'canonical, every row has an email', emails: true },
+      { file: 'consumer-debugging-aug-14/NBF0001828_09072026_14082026_W1 (1).xlsx', subjects: 3, layout: '"Consumer" tab, labels on row 1, no header block' },
+      { file: 'consumer-debugging-aug-14/NBF0001828_15062026_14082026_W2 (1).xlsx', subjects: 3, layout: '"Consumer" tab, labels on row 1, no header block' },
+      { file: 'consumer-debugging-aug-14/NBF0001828_30062026_14082026_ME (1).xlsx', subjects: 3, layout: '"Consumer" tab, labels on row 1, no header block' },
+    ];
+
+    for (const c of CASES) {
+      it(`${c.file} — ${c.layout}`, async () => {
+        expect(existsSync(tref(c.file))).toBe(true);
+        const result: any = await convert(readFileSync(tref(c.file)), getFormat('consumer-tudf'), META, {
+          bypassErrors: Boolean(c.dataDefects),
+        });
+        const errors = err(result);
+        if (c.dataDefects) {
+          // Exactly the accountant's known blanks — nothing new, nothing lost.
+          expect([...new Set(errors.map((e: any) => e.fieldKey))].sort()).toEqual([...c.dataDefects].sort());
+        } else {
+          expect(errors, `validation errors: ${errors.map((e: any) => e.message).join('; ')}`).toEqual([]);
+        }
+        const out: string = result.outputText ?? '';
+        expect(out.length).toBeGreaterThan(146);
+
+        // Header: 146 fixed bytes, Date Reported at position 55, cycle at 53.
+        expect(out.slice(0, 6)).toBe('TUDF12');
+        expect(out.slice(54, 62)).toBe(c.sheetReportingDate ?? '09092026');
+        expect(out.slice(146, 153)).toBe('PN03N01');
+        // Header short name: the form's header block, or (bare export, no block) the
+        // short name the accountant typed on the account rows — never an invented
+        // default. It must be the same name the TL/02 fields carry.
+        expect(out.slice(36, 52)).not.toContain('CRIFHIGH');
+        const tl02 = /TL04T001\d{4}[^]*?02(\d\d)/.exec(out);
+        const bodyShortName = tl02 ? out.slice(tl02.index + tl02[0].length, tl02.index + tl02[0].length + Number(tl02[1])) : '';
+        expect(bodyShortName.length).toBeGreaterThan(0);
+        expect(out.slice(36, 52).trimEnd()).toBe(bodyShortName);
+
+        // Body: walks to TRLR; one of each mandatory segment per subject.
+        const parsed = crifParse(out);
+        expect(parsed, `stream desynchronised at ${(parsed as any).at}: ${JSON.stringify((parsed as any).saw)}`).toMatchObject({ ok: true });
+        expect(parsed.subjects).toBe(c.subjects);
+        expect(parsed.segs.PN).toBe(c.subjects);
+        expect(parsed.segs.PA).toBe(c.subjects);
+        expect(parsed.segs.TL).toBe(c.subjects);
+        // EC is "When Available": present for every subject only when the sheet has emails.
+        expect(parsed.segs.EC ?? 0).toBe(c.emails ? c.subjects : 0);
+        // Rate of Interest is "When Available": a blank sheet cell means NO tag 38 —
+        // never a substituted number — and the file still generates.
+        const tl38 = (out.match(/TL04T001[^]*?(?=ES02\*\*)/g) ?? []).filter((seg) => /(?:^|\d\d)38\d\d\d+\.\d/.test(seg)).length;
+        if (c.roiBlank) expect(tl38).toBe(0);
+        else expect(tl38).toBe(c.subjects);
+        // Days Past Due (tag 15) pairs with Asset Classification: the sheet always
+        // carries it, so every account reports it and nothing is invented for 26.
+        expect(parsed.segs.TL).toBe(c.subjects);
+        // TL/01 is the 10-char member code and equals the header member id on every account.
+        expect(parsed.tl01).toHaveLength(c.subjects);
+        expect(new Set(parsed.tl01)).toEqual(new Set([MEMBER]));
+        expect(out.slice(6, 16)).toBe(MEMBER);
+        // Every byte survives latin1: no control bytes, nothing above 0x7E.
+        for (const b of Buffer.from(out, 'latin1')) expect(b).toBeGreaterThanOrEqual(0x20);
+        for (const b of Buffer.from(out, 'latin1')) expect(b).toBeLessThanOrEqual(0x7e);
+        expect(out.endsWith('ES02**TRLR')).toBe(true);
+      });
+    }
+
+    it('an unencodable (>99-byte) coded value blocks even under --bypass-errors', async () => {
+      // A >99-byte value cannot be written as [tag][len(2)][value]; emitting it would
+      // corrupt every byte after it. Build a canonical form with one such name.
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(readFileSync(tref('consumer-debugging-sept-19/instance_2.xlsx')) as unknown as ArrayBuffer);
+      const ws = wb.getWorksheet('Data Submission Form')!;
+      // (An address can't be used here: the explode chunks it into 40-char lines, so
+      // PA/01 can never overflow. Name and email have no such splitter.)
+      ws.getCell('V11').value = 'x'.repeat(100) + '@example.com'; // Email ID 1 -> EC/01
+      ws.getCell('A12').value = 'B'.repeat(120); // Consumer Name -> PN/01 (maxLength 99)
+      const buf = Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+      const r: any = await convert(buf, getFormat('consumer-tudf'), META, { bypassErrors: true });
+      expect(r.output, 'unencodable value must not produce a file under bypass').toBeUndefined();
+      expect(r.report.hasNonBypassableErrors).toBe(true);
+      const blocking = err(r).filter((e: any) => e.bypassable === false).map((e: any) => e.fieldKey).sort();
+      expect(blocking).toEqual(['email', 'name']);
+    });
+  });
+
   // --- CATCH WRONG INPUTS: synthetic malformed workbooks must be rejected. ---
   describe('wrong inputs are rejected (not silently mis-converted)', () => {
     const buildWb = async (fill: (ws: ExcelJS.Worksheet) => void): Promise<Buffer> => {
@@ -301,14 +457,31 @@ describe('reference-files pre-rollout validation', () => {
 
     it('an empty workbook does not yield valid output', async () => {
       const buf = await buildWb(() => {});
+      for (const fmt of ['consumer-ucrf12-flat', 'consumer-tudf'] as FormatId[]) {
+        let rejected = false;
+        try {
+          const r: any = await convert(buf, getFormat(fmt), META_DEFAULT);
+          rejected = err(r).length > 0 || String(r.outputText ?? '').length === 0;
+        } catch {
+          rejected = true;
+        }
+        expect(rejected, `${fmt}: empty workbook should error or produce no output`).toBe(true);
+      }
+    });
+
+    it('a workbook with unrelated columns is rejected by consumer-tudf (header-matched)', async () => {
+      const buf = await buildWb((ws) => {
+        ws.getRow(1).values = ['Foo', 'Bar', 'Baz'];
+        ws.getRow(2).values = ['1', '2', '3'];
+      });
       let rejected = false;
       try {
-        const r: any = await convert(buf, getFormat('consumer-ucrf12-flat'), META_DEFAULT);
+        const r: any = await convert(buf, getFormat('consumer-tudf'), META_DEFAULT);
         rejected = err(r).length > 0 || String(r.outputText ?? '').length === 0;
-      } catch {
-        rejected = true;
+      } catch (e: any) {
+        rejected = /not found|columns|sheet/i.test(String(e.message));
       }
-      expect(rejected, 'empty workbook should error or produce no output').toBe(true);
+      expect(rejected, 'garbage columns must not become a header-only TUDF file').toBe(true);
     });
 
     it('a workbook with unrelated columns is rejected by the header-matched commercial format', async () => {
@@ -330,6 +503,7 @@ describe('reference-files pre-rollout validation', () => {
     it('a corrupt (non-xlsx) buffer is rejected', async () => {
       const buf = Buffer.from('this is not a spreadsheet', 'utf8');
       await expect(convert(buf, getFormat('consumer-ucrf12-flat'), META_DEFAULT)).rejects.toBeTruthy();
+      await expect(convert(buf, getFormat('consumer-tudf'), META_DEFAULT)).rejects.toBeTruthy();
     });
   });
 });

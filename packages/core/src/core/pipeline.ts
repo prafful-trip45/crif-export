@@ -1,5 +1,6 @@
 import { assemble, computeCounts } from '../encoding/engine.js';
 import { groupByBorrower } from '../input/grouper.js';
+import type { Borrower } from '../input/model.js';
 import { readFlatHeaderOverrides, readWorkbook } from '../input/workbook-reader.js';
 import { toBuffer } from '../output/file-writer.js';
 import { writeReport } from '../output/report-writer.js';
@@ -80,6 +81,14 @@ export async function convert(
   // sheet itself; a non-blank sheet cell overrides the corresponding meta flag.
   const overrides = await readFlatHeaderOverrides(buffer, format);
   const effectiveMeta: FileMeta = { ...meta, ...overrides };
+  // The member short name has three sources, in order: the flag, the form's header
+  // block, and — for a bare export with no header block at all (labels on row 1) —
+  // the value the accountant typed on every account row. Never an invented default:
+  // the header short name must be the one CIBIL assigned to this member.
+  if (!effectiveMeta.memberShortName) {
+    const fromBody = firstBodyValue(borrowers, 'memberShortName');
+    if (fromBody) effectiveMeta.memberShortName = fromBody;
+  }
 
   const text = assemble(format, borrowers, effectiveMeta);
   await phase('encoding', format.fileEncoding.toUpperCase());
@@ -89,4 +98,15 @@ export async function convert(
   await phase('writing', 'done');
   await phase('done');
   return { report, output, outputText: text, counts, reportWorkbook };
+}
+
+/** First non-blank value of `key` across all borrowers' segments, in file order. */
+function firstBodyValue(borrowers: Borrower[], key: string): string | undefined {
+  for (const b of borrowers) {
+    for (const seg of b.segments) {
+      const v = seg.values[key];
+      if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+    }
+  }
+  return undefined;
 }

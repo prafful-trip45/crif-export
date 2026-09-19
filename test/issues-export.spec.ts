@@ -58,18 +58,48 @@ describe('issues export workbook', () => {
     const lastErrIdx = rows.map((x) => x['Severity']).lastIndexOf('error');
     if (firstWarnIdx >= 0 && lastErrIdx >= 0) expect(lastErrIdx).toBeLessThan(firstWarnIdx);
 
-    // 3) The derived RS-state warning points at the address column as an A1 cell (e.g. AF2),
-    //    NOT at a nonexistent "State" column.
-    const stateWarn = rows.find((x) => String(x['Field'] ?? '').includes('State/Union Territory'));
-    expect(stateWarn).toBeDefined();
-    if (stateWarn) {
-      expect(stateWarn['Cell']).toMatch(/^[A-Z]+\d+$/);
-      expect(stateWarn['Column']).toMatch(/^[A-Z]+$/);
-    }
 
-    // 4) A borrower-level error (or unmapped field error) has no single source cell → blank Cell/Column.
+    // 3) A borrower-level error (or unmapped field error) has no single source cell → blank Cell/Column.
     const errRow = rows.find((x) => x['Severity'] === 'error' && x['Cell'] === '') || rows.find((x) => x['Severity'] === 'error')!;
     expect(errRow).toBeDefined();
     expect(errRow['Severity']).toBe('error');
+  });
+
+  /**
+   * A field DERIVED from free text (state/city/PIN parsed out of the address column)
+   * must point the operator at the column they can actually edit — the address column —
+   * not at a "State" column that does not exist in the Master Sheet. No real reference
+   * file still trips this (every one of their cities now resolves), so the fixture is
+   * built here with a deliberately unresolvable address.
+   */
+  it('points a derived address field at the address column it was read from', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Master Sheet');
+    ws.addRow([
+      "Borrower's Name", "Borrower's PAN", 'Borrowers Legal Constitution', 'Business Category',
+      'Business/ Industry Type', "Borrower's Address with PIN Code", "Borrower's Contact No.",
+      "Borrower's Account Number", 'Facility / Loan Activation / Sanction Date',
+      'Sanctioned Amount/ Notional Amount of Contract', 'Credit Type',
+      'Current Balance / Limit Utilized', 'Asset Classification', 'Account Status',
+    ]);
+    ws.addRow([
+      'First Ltd', 'AAAAA1111A', '30', '03', '06', 'Unit 7, Unknown Place', '9999999999', 'A1',
+      '01012024', '100000', '5000', '5000', '0001', '01',
+    ]);
+    const buffer = new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer).buffer;
+
+    const r: any = await convert(buffer, getFormat('commercial-ucrf-flat-v310'), META, {
+      allowWarnings: true,
+      bypassErrors: true,
+    });
+    const rows = await readIssues(await writeIssuesWorkbook(r.report));
+
+    // "Borrower's Address with PIN Code" is column F on the sheet above; row 2 is the
+    // first data row, so the citation must read F2 — not a blank or invented cell.
+    const derived = rows.find((x) => x['Field'] === 'address');
+    expect(derived).toBeDefined();
+    expect(derived!['Cell']).toBe('F2');
+    expect(derived!['Column']).toBe('F');
+    expect(derived!['Severity']).toBe('error');
   });
 });
