@@ -21,7 +21,7 @@ export interface SegmentRow {
     fieldKey: string;
     message: string;
     severity?: Severity;
-    rule?: 'lookup' | 'parse';
+    rule?: 'lookup' | 'parse' | 'format';
     reference?: string;
     blocksBypass?: boolean;
   }>;

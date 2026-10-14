@@ -11,7 +11,9 @@ export type ValidationRule =
   | 'empty-input'
   /** A cross-segment rule the bureau portal enforces on ingestion (e.g. every borrower
    * needs a Registered Office address) that the per-field walk can't express. */
-  | 'portal-mandatory';
+  | 'portal-mandatory'
+  /** The same identifier (e.g. a credit-facility account number) appears more than once in the file. */
+  | 'duplicate';
 
 export type Severity = 'error' | 'warning';
 

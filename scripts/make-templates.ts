@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import ExcelJS from 'exceljs';
 import { FORMATS } from '../packages/core/src/formats/index.js';
+import { buildCommercialMasterTemplate } from './commercial-master-template.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const outDir = join(here, '..', 'templates');
@@ -75,5 +76,13 @@ for (const format of Object.values(FORMATS)) {
 
   const file = join(outDir, `${format.id}-input.xlsx`);
   await wb.xlsx.writeFile(file);
+  console.log(`wrote ${file}`);
+}
+
+// Commercial Master Sheet with split address / phone columns, dropdowns and in-sheet
+// checks — the template accountants fill for commercial-ucrf-flat(-v310).
+{
+  const file = join(outDir, 'commercial-master-sheet.xlsx');
+  await (await buildCommercialMasterTemplate()).xlsx.writeFile(file);
   console.log(`wrote ${file}`);
 }

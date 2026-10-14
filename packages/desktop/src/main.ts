@@ -1046,6 +1046,8 @@ function groupTitle(shared: string | undefined, rule: string, label: string): st
       return `${label} breaks a rule the portal enforces on upload`;
     case 'empty-input':
       return 'No records were read from the input workbook';
+    case 'duplicate':
+      return `${label} is repeated across rows`;
     default:
       return shared ?? `${label} failed validation`;
   }
@@ -1067,6 +1069,7 @@ function groupFix(shared: string | undefined, rule: string, label: string, bypas
     cardinality: `The number of records per borrower does not match what the format requires. Add the missing row, or remove the extra one.`,
     'portal-mandatory': `The portal enforces this on ingestion, so the file is refused at upload rather than at validation. Fix it in the sheet before re-running.`,
     'empty-input': `Check the file is the right one, the data sits on the expected sheet, and the column headers match the format.`,
+    duplicate: `Each credit facility must appear once with its own account number. Correct the number if these are different loans, or delete the repeated row.`,
   };
   const parts = [
     shared && shared.length > TITLE_MAX ? shared : null,

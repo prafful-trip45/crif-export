@@ -167,6 +167,13 @@ The accountant keeps **one flat row per borrower** in a "Master Sheet"; each row
 - **Address:** prefer explicit **City / State / PIN** columns when the template has them; keep the
   full address text in **Address Line 1**; District carries the **state name** (canonical), state
   code from table 8.6, country field carries the telephone STD code (`079` in the sample).
+- **Split-address template** (`templates/commercial-master-sheet.xlsx`, built by
+  `scripts/commercial-master-template.ts`): `"<Party> Address Line 1/2/3"`, `City`, `District`,
+  `State`, `PIN Code`, `Mobile`, `Landline STD Code`, `Landline Number` for Borrower's / Related
+  Person's / Guarantor's. These win over the free-text column; a blank State falls back to the PIN
+  circle. Guarantor sub-headers are matched positionally inside each "Guarantor Type" block —
+  "address line N" before the generic "address", and city/state/pin after it, so the older
+  "…Address Full address with pin code" header stays the free-text address.
 - **Header cells** `B5/B6/B7` = Member ID / Reporting Date / Creation Date override CLI flags.
   Creation Date is often absent from the sheet → supply via UI/CLI.
 

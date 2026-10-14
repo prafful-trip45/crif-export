@@ -45,6 +45,17 @@ The engine reads two input shapes:
      **"Credit Type Code"** lookup sheet) → `HD/BS/AS/RS/CR/(GS/SS/CD)/TS` `.txt`.
    - `consumer-ucrf12-flat` — a Consumer **"Data Submission Form"** → concatenated TUDF `.txt`.
 
+   For new commercial data, hand accountants **`templates/commercial-master-sheet.xlsx`**
+   (`npm run make:templates`). It splits every address into Line 1/2/3, City, District,
+   State (dropdown) and PIN, and every phone into Mobile / Landline STD Code / Landline
+   Number, for the borrower, related person and up to two guarantors; coded columns are
+   dropdowns, and in-sheet checks reject a malformed PAN/PIN/mobile, a repeated account
+   number or a `|`. The converter reads these columns directly instead of parsing the
+   free-text address. Older sheets with one "Address with PIN Code" column still work and
+   get warnings for a misspelt state, a locality in City, a PIN from another state, a
+   landline in the Mobile field and the same PAN entered with two addresses; a repeated
+   account number is a blocking error.
+
    Values the flat sheet doesn't carry (member id, dates, branch code `HO`, relationship
    DUNS, currency `INR`, telephone area code, …) come from CLI flags + built-in defaults.
    Coded columns accept either the legend **number** or the legend **label** (e.g. Account

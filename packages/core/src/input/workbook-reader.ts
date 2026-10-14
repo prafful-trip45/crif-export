@@ -201,8 +201,8 @@ export async function readFlatExplodeWorkbook(
   // (e.g. rsStateCode) onto the column of the input it parses from (relatedAddress).
   const sourceColumns: Record<string, string> = {};
   for (const [col, key] of colToKey) sourceColumns[key] = numberToColLetter(col);
-  for (const [wireKey, inputKey] of Object.entries(format.flatExplode!.wireFieldSource ?? {})) {
-    const col = sourceColumns[inputKey];
+  for (const [wireKey, inputKeys] of Object.entries(format.flatExplode!.wireFieldSource ?? {})) {
+    const col = [inputKeys].flat().map((k) => sourceColumns[k]).find(Boolean);
     if (col) sourceColumns[wireKey] = col;
   }
 

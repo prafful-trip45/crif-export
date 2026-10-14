@@ -387,42 +387,161 @@ function gsRelType(code: string, opts: FlatOpts): string {
   return String(Number(code));
 }
 
+/** Separate address columns (split-address template); any may be absent. */
+interface ExplicitAddress {
+  line1?: FieldValue;
+  line2?: FieldValue;
+  line3?: FieldValue;
+  city?: FieldValue;
+  district?: FieldValue;
+  state?: FieldValue;
+  pin?: FieldValue;
+}
+
+interface ResolvedAddress {
+  line1: string;
+  line2: string;
+  line3: string;
+  city: string;
+  district: string;
+  stateName: string;
+  stateCode: string;
+  pinCode: string;
+  /** Non-blocking data-quality findings (misspelt state, locality in City, PIN/state clash). */
+  notes: string[];
+}
+
+/** State/UT codes whose PINs sit inside another state's postal circle (Chandigarh 160,
+ * Daman/DNH 396, Puducherry 605, Ladakh 194, Lakshadweep 682, …) — a PIN-prefix
+ * comparison would raise false alarms for them, so they are left out of it. */
+const PIN_CIRCLE_EXEMPT = new Set(['01', '06', '08', '09', '18', '27', '37', '77']);
+
 /**
- * Resolve an address into the CRIF sub-fields, preferring explicit City/State/PIN
- * columns (future template) over values parsed from the free-text address. `state`
- * may be a state name or a 2-digit code.
+ * Resolve an address into the CRIF sub-fields, preferring explicit Line/City/State/PIN
+ * columns (split-address template) over values parsed from the free-text address.
+ * `state` may be a state name or a 2-digit code.
  */
-function resolveAddress(
-  raw: FieldValue,
-  city?: FieldValue,
-  state?: FieldValue,
-  pin?: FieldValue,
-): { line1: string; city: string; stateName: string; stateCode: string; pinCode: string } {
+function resolveAddress(raw: FieldValue, explicit: ExplicitAddress = {}): ResolvedAddress {
   const parsed = splitAddress(raw);
+  const notes = [...parsed.notes];
   let stateName = parsed.stateName;
   let stateCode = parsed.stateCode;
-  const st = strNA(state);
+  const st = strNA(explicit.state);
   if (st !== '') {
     const byName = STATE_LOOKUP.find((x) => x.needle === st.toLowerCase());
-    const byCode = (STATE_CODE as Record<string, string>)[st];
+    const byCode = (STATE_CODE as Record<string, string>)[st.padStart(2, '0')];
     if (byName) {
       stateName = byName.name;
       stateCode = byName.code;
     } else if (byCode) {
       stateName = byCode;
-      stateCode = st;
+      stateCode = st.padStart(2, '0');
     } else {
       stateName = st;
       stateCode = '';
     }
   }
+  const pinCode = strNA(explicit.pin) || parsed.pinCode;
+  // Split-address sheets with no free-text column: a blank State column falls back to
+  // the PIN's postal circle, exactly as the free-text parser does.
+  if (!stateCode && st === '' && pinCode) {
+    const byPin = stateFromPin(pinCode);
+    if (byPin) {
+      stateCode = byPin.code;
+      stateName = byPin.name;
+    }
+  }
+  if (stateCode && /^\d{6}$/.test(pinCode) && !PIN_CIRCLE_EXEMPT.has(stateCode)) {
+    const byPin = stateFromPin(pinCode);
+    if (byPin && byPin.code !== stateCode && !PIN_CIRCLE_EXEMPT.has(byPin.code)) {
+      notes.push(
+        `PIN ${pinCode} belongs to ${byPin.name} (${byPin.code}) but the state is ${stateName} (${stateCode}). Correct the PIN or the state.`,
+      );
+    }
+  }
+  const city = strNA(explicit.city) || parsed.city;
+  notes.push(...cityNotes(city));
   return {
-    line1: parsed.line1,
-    city: strNA(city) || parsed.city,
+    line1: strNA(explicit.line1) || parsed.line1,
+    line2: strNA(explicit.line2),
+    line3: strNA(explicit.line3),
+    city,
+    district: strNA(explicit.district) || city,
     stateName,
     stateCode,
-    pinCode: strNA(pin) || parsed.pinCode,
+    pinCode,
+    notes,
   };
+}
+
+/** Plain Levenshtein distance (short strings only — state and city names). */
+function editDistance(a: string, b: string): number {
+  const prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0]!;
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const up = prev[j]!;
+      prev[j] = Math.min(up + 1, prev[j - 1]! + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = up;
+    }
+  }
+  return prev[b.length]!;
+}
+
+/** Edits tolerated for a name of this length: none below 6 letters ("Goa", "Assam",
+ * "Delhi" are too short to tell a typo from another word), 1 up to 8, else 2. */
+const typoBudget = (len: number): number => (len < 6 ? 0 : len < 9 ? 1 : 2);
+
+/**
+ * Misspelt-state fallback for free text with no exact state name ("…Hassan, Karanataka
+ * India 573201"): the last run of 1–3 words within the typo budget of a catalogue name.
+ */
+function findStateFuzzy(full: string): { name: string; code: string; index: number; typed: string } | undefined {
+  const words = [...full.matchAll(/[a-z]+/gi)].map((m) => ({ text: m[0].toLowerCase(), index: m.index! }));
+  let best: { name: string; code: string; index: number; typed: string; end: number } | undefined;
+  for (let i = 0; i < words.length; i++) {
+    for (let n = 1; n <= 3 && i + n <= words.length; n++) {
+      const run = words.slice(i, i + n);
+      const typed = run.map((w) => w.text).join(' ');
+      for (const s of STATE_LOOKUP) {
+        const budget = typoBudget(s.needle.length);
+        if (budget === 0 || Math.abs(s.needle.length - typed.length) > budget) continue;
+        if (editDistance(typed, s.needle) > budget) continue;
+        const end = run[n - 1]!.index + run[n - 1]!.text.length;
+        if (!best || end > best.end) {
+          best = { name: s.name, code: s.code, index: run[0]!.index, typed: full.slice(run[0]!.index, end), end };
+        }
+      }
+    }
+  }
+  return best && { name: best.name, code: best.code, index: best.index, typed: best.typed };
+}
+
+/**
+ * City sanity checks. The City field should hold just the city/town; free-text parsing
+ * takes the comma segment before the state, which is often a locality run
+ * ("Hitech City Shaikpet Madhapur Hyderabad") or, when the state is misspelt, the state.
+ */
+function cityNotes(city: string): string[] {
+  if (city === '') return [];
+  const lower = city.toLowerCase().replace(/\s+/g, ' ').trim();
+  const asState = STATE_LOOKUP.find((s) => s.needle === lower);
+  if (asState) return [`City "${city}" is a state name (${asState.name}). Enter the city or town in the City column.`];
+  const notes: string[] = [];
+  const words = lower.split(' ');
+  if (/\d/.test(city) || words.length > 2) {
+    notes.push(`City "${city}" looks like it includes the locality or street. Enter only the city or town (e.g. "Hyderabad") in the City column.`);
+  }
+  for (const w of words) {
+    if (w.length < 6 || CITY_STATE[w]) continue;
+    const near = Object.keys(CITY_STATE).find((c) => {
+      const budget = typoBudget(c.length);
+      return budget > 0 && Math.abs(c.length - w.length) <= budget && editDistance(w, c) <= budget;
+    });
+    if (near) notes.push(`City "${city}": "${w.toUpperCase()}" looks like a misspelling of "${near[0]!.toUpperCase()}${near.slice(1)}".`);
+  }
+  return notes;
 }
 
 /* ---------- state lookup (CRIF catalogue 8.6, name -> code) ---------- */
@@ -631,18 +750,31 @@ function splitAddress(raw: FieldValue): {
   stateName: string;
   stateCode: string;
   pinCode: string;
+  notes: string[];
 } {
-  const full = str(raw);
+  // A line break typed inside the cell (Alt+Enter) would split the record on the wire.
+  const full = str(raw).replace(/[ \t]*[\r\n\t]+[ \t]*/g, ' ');
   if (isBlankPlaceholder(full)) {
-    return { line1: '', city: '', stateName: '', stateCode: '', pinCode: '' };
+    return { line1: '', city: '', stateName: '', stateCode: '', pinCode: '', notes: [] };
   }
-  const st = findState(full.toLowerCase());
+  const notes: string[] = [];
+  let st: { name: string; code: string; index: number } | undefined = findState(full.toLowerCase());
+  if (!st) {
+    // A near-miss can be an ordinary word ("Gujarati Society, Mumbai 400001"), so a
+    // fuzzy state is only trusted when the PIN's postal circle confirms it.
+    const fuzzy = findStateFuzzy(full);
+    const pinState = stateFromPin(lastPinMatch(full)?.pin ?? '');
+    if (fuzzy && pinState?.code === fuzzy.code) {
+      notes.push(`State "${fuzzy.typed}" in the address looks misspelt; read as ${fuzzy.name} (${fuzzy.code}). Correct the spelling.`);
+      st = fuzzy;
+    }
+  }
   if (st) {
     const pinCode = lastPinMatch(full)?.pin ?? '';
     const before = full.slice(0, st.index).replace(/[\s,\-]+$/, '');
     const lastComma = before.lastIndexOf(',');
     const city = (lastComma >= 0 ? before.slice(lastComma + 1) : before.split(/\s+/).pop() ?? '').trim();
-    return { line1: full, city, stateName: st.name, stateCode: st.code, pinCode };
+    return { line1: full, city, stateName: st.name, stateCode: st.code, pinCode, notes };
   }
 
   // Older "<street>, <City> - <PIN>. COUNTRY" form: strip the tail off Line 1.
@@ -677,6 +809,7 @@ function splitAddress(raw: FieldValue): {
     stateName,
     stateCode,
     pinCode,
+    notes,
   };
 }
 
@@ -766,10 +899,29 @@ const COLUMN_HEADERS: Record<string, string> = {
   'Value of Security': 'securityValue',
   'Type of Security': 'securityType',
   'Security Classification': 'securityClass',
-  // Optional explicit address columns (future template; absent in the 1 Jul sheets)
+  // Split-address template (templates/commercial-master-sheet.xlsx): each address part
+  // and phone has its own column, so nothing is parsed out of free text. Absent in the
+  // older Master Sheets, which keep the single "…Address with PIN Code" column.
+  "Borrower's Address Line 1": 'borrowerAddressLine1',
+  "Borrower's Address Line 2": 'borrowerAddressLine2',
+  "Borrower's Address Line 3": 'borrowerAddressLine3',
   "Borrower's City": 'borrowerCity',
+  "Borrower's District": 'borrowerDistrict',
   "Borrower's State": 'borrowerState',
   "Borrower's PIN": 'borrowerPin',
+  "Borrower's Mobile": 'borrowerMobile',
+  "Borrower's Landline STD Code": 'borrowerStdCode',
+  "Borrower's Landline Number": 'borrowerLandline',
+  "Related Person's Address Line 1": 'relatedAddressLine1',
+  "Related Person's Address Line 2": 'relatedAddressLine2',
+  "Related Person's Address Line 3": 'relatedAddressLine3',
+  "Related Person's City": 'relatedCity',
+  "Related Person's District": 'relatedDistrict',
+  "Related Person's State": 'relatedState',
+  "Related Person's PIN": 'relatedPin',
+  "Related Person's Mobile": 'relatedMobile',
+  "Related Person's Landline STD Code": 'relatedStdCode',
+  "Related Person's Landline Number": 'relatedLandline',
   // Expanded template (July 26): extra columns that carry the value/code directly.
   // "Company Registration Number" / "Date of Incorporation" also repeat for the related
   // person, but the header matcher breaks ties toward the FIRST (borrower) column, so
@@ -789,15 +941,23 @@ const COLUMN_HEADERS: Record<string, string> = {
  * parsed out of the single free-text address column, so a blank State/Union Territory
  * points at the address cell — the sheet has no "State" column of its own.
  */
-const WIRE_FIELD_SOURCE: Record<string, string> = {
-  addressLine1: 'address', cityTown: 'address', stateCode: 'address', pinCode: 'address',
-  rsAddressLine1: 'relatedAddress', rsCity: 'relatedAddress', rsStateCode: 'relatedAddress', rsPinCode: 'relatedAddress',
+const WIRE_FIELD_SOURCE: Record<string, string | string[]> = {
+  // Split-address columns first; the free-text address column when the sheet has none.
+  addressLine1: ['borrowerAddressLine1', 'address'],
+  cityTown: ['borrowerCity', 'address'],
+  stateCode: ['borrowerState', 'address'],
+  pinCode: ['borrowerPin', 'address'],
+  mobileNumber: ['borrowerMobile', 'contactNo'],
+  rsAddressLine1: ['relatedAddressLine1', 'relatedAddress'],
+  rsCity: ['relatedCity', 'relatedAddress'],
+  rsStateCode: ['relatedState', 'relatedAddress'],
+  rsPinCode: ['relatedPin', 'relatedAddress'],
   relationship: 'relationshipType',
   relationshipType: 'relationshipType',
   fullName: 'relatedName',
   dateOfBirth: 'relatedDob',
   rsPan: 'relatedPan',
-  rsMobile: 'relatedContact',
+  rsMobile: ['relatedMobile', 'relatedContact'],
   legalConstitution: 'legalConstitution',
   businessCategory: 'businessCategory',
   businessIndustryType: 'businessIndustryType',
@@ -805,6 +965,54 @@ const WIRE_FIELD_SOURCE: Record<string, string> = {
   assetClassification: 'assetClassification',
   accountStatus: 'accountStatus',
 };
+
+/**
+ * Mobile + landline for one party. The split template has separate Mobile / Landline
+ * STD Code / Landline Number columns; older sheets have one "Contact No" that lands in
+ * the Mobile field as-is (a landline there is flagged, not moved — its STD code can't
+ * be split off reliably).
+ */
+function phoneParts(
+  who: string,
+  mobile: FieldValue,
+  legacyContact: FieldValue,
+  stdCode: FieldValue,
+  landline: FieldValue,
+): { mobile: string; telAreaCode: string; telNumber: string; notes: string[] } {
+  const m = strNA(mobile) || strNA(legacyContact);
+  const notes: string[] = [];
+  const digits = m.replace(/[\s\-+]/g, '');
+  if (m !== '' && !/^(?:91|0)?[6-9]\d{9}$/.test(digits)) {
+    notes.push(
+      /^0[1-5]/.test(digits)
+        ? `${who} contact "${m}" looks like a landline, but it is reported in the Mobile field. Put the 10-digit mobile there and the landline in the Landline columns.`
+        : `${who} mobile "${m}" is not a 10-digit Indian mobile number.`,
+    );
+  }
+  return { mobile: m, telAreaCode: strNA(stdCode), telNumber: strNA(landline), notes };
+}
+
+/** PAN 4th character the Income Tax department assigns per holder type, keyed by the
+ * CRIF Legal Constitution code (only the unambiguous ones). */
+const PAN_HOLDER_TYPE: Record<string, { ch: string; what: string }> = {
+  '11': { ch: 'C', what: 'company' },
+  '12': { ch: 'C', what: 'company' },
+  '30': { ch: 'P', what: 'individual (proprietor)' },
+  '40': { ch: 'F', what: 'firm' },
+  '50': { ch: 'T', what: 'trust' },
+  '55': { ch: 'H', what: 'HUF' },
+  '70': { ch: 'A', what: 'association of persons' },
+  '80': { ch: 'G', what: 'government' },
+  '90': { ch: 'P', what: 'individual' },
+};
+
+/** Same letters/digits, ignoring case, spacing and punctuation ("Road no 13A," == "Road, no 13A"). */
+const sameText = (a: string, b: string): boolean =>
+  a.toLowerCase().replace(/[^a-z0-9]/g, '') === b.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const fullAddress = (a: ResolvedAddress): string => [a.line1, a.line2, a.line3, a.city, a.pinCode].join(' ');
+/** Address as typed, for messages (a free-text Line 1 already carries city and PIN). */
+const shownAddress = (a: ResolvedAddress): string => [a.line1, a.line2, a.line3].filter(Boolean).join(', ');
 
 function explode(
   input: Record<string, FieldValue>,
@@ -852,6 +1060,18 @@ function explode(
     });
   }
 
+  const constitution = mapLegend(LEGAL_CONSTITUTION, input.legalConstitution);
+  const holder = constitution ? PAN_HOLDER_TYPE[constitution] : undefined;
+  const borrowerPan = str(input.pan).toUpperCase();
+  if (holder && /^[A-Z]{5}\d{4}[A-Z]$/.test(borrowerPan) && borrowerPan[3] !== holder.ch) {
+    issues.push({
+      fieldKey: 'pan',
+      severity: 'warning',
+      rule: 'format',
+      message: `Borrower PAN ${borrowerPan} is not a ${holder.what} PAN (4th letter should be "${holder.ch}", found "${borrowerPan[3]}") but the Legal Constitution is ${constitution}. Check the PAN or the constitution.`,
+    });
+  }
+
   // ---- BS (borrower) ----
   seeds.push({
     tag: 'BS',
@@ -882,85 +1102,93 @@ function explode(
   // Warehouse, 04 Plant), we emit TWO AS segments:
   // 1. Mandatory 01 Registered Office AS segment (using the primary address)
   // 2. The user-selected secondary AS segment (03 / 04 / 02 / 05 / 06)
-  const ba = resolveAddress(input.address, input.borrowerCity, input.borrowerState, input.borrowerPin);
+  const ba = resolveAddress(input.address, {
+    line1: input.borrowerAddressLine1,
+    line2: input.borrowerAddressLine2,
+    line3: input.borrowerAddressLine3,
+    city: input.borrowerCity,
+    district: input.borrowerDistrict,
+    state: input.borrowerState,
+    pin: input.borrowerPin,
+  });
   const userLocType = mapLegend(LOCATION_TYPE, input.locationType);
   const primaryLocType = userLocType || DEFAULTS.officeLocationType;
+  const borrowerAddressKey = strNA(input.address) !== '' ? 'address' : 'borrowerAddressLine1';
+  for (const message of ba.notes) {
+    issues.push({ fieldKey: borrowerAddressKey, severity: 'warning', rule: 'format', message: `Borrower address: ${message}` });
+  }
+  const bp = phoneParts('Borrower', input.borrowerMobile, input.contactNo, input.borrowerStdCode, input.borrowerLandline);
+  for (const message of bp.notes) issues.push({ fieldKey: 'mobileNumber', severity: 'warning', rule: 'format', message });
 
   // Address parsing validation
-  if (input.address && !ba.stateCode) {
+  if ((strNA(input.address) !== '' || ba.line1 !== '') && !ba.stateCode) {
     issues.push({
-      fieldKey: 'address',
+      fieldKey: borrowerAddressKey === 'address' ? 'address' : 'borrowerState',
       severity: 'error',
       rule: 'parse',
       blocksBypass: true,
-      message: `Could not determine State Code from address "${input.address}". Add a recognized state name, CRIF state code, or a valid 6-digit Indian PIN code before generating the file.`,
+      message: `Could not determine State Code from borrower address "${ba.line1}". Pick the state from the list (or add a recognized state name / CRIF state code / valid 6-digit PIN) before generating the file.`,
     });
   }
 
-  // 1. Mandatory 01 (Registered Office) AS segment (CRIF Commercial Section 7.3 requirement)
-  seeds.push({
-    tag: 'AS',
-    flag: 2,
-    values: row({
+  const asValues = (officeLocationType: string): TypedRow =>
+    row({
       _tag: 'AS',
-      officeLocationType: '01',
+      officeLocationType,
       officeDunsNumber: strNA(input.officeDuns) || DEFAULTS.officeDuns,
       addressLine1: ba.line1,
+      addressLine2: ba.line2,
+      addressLine3: ba.line3,
       cityTown: ba.city,
-      district: ba.city,
+      district: ba.district,
       stateCode: ba.stateCode,
       pinCode: ba.pinCode,
       country: DEFAULTS.countryCode,
-      mobileNumber: strNA(input.contactNo),
-    }),
-  });
+      mobileNumber: bp.mobile,
+      telAreaCode: bp.telAreaCode,
+      telNumber: bp.telNumber,
+    });
+
+  // 1. Mandatory 01 (Registered Office) AS segment (CRIF Commercial Section 7.3 requirement)
+  seeds.push({ tag: 'AS', flag: 2, values: asValues('01') });
 
   // 2. If the user specified a non-01 location type (e.g. 03, 04), dual-emit the 2nd AS segment
   if (primaryLocType !== '01') {
-    seeds.push({
-      tag: 'AS',
-      flag: 2,
-      values: row({
-        _tag: 'AS',
-        officeLocationType: primaryLocType,
-        officeDunsNumber: strNA(input.officeDuns) || DEFAULTS.officeDuns,
-        addressLine1: ba.line1,
-        cityTown: ba.city,
-        district: ba.city,
-        stateCode: ba.stateCode,
-        pinCode: ba.pinCode,
-        country: DEFAULTS.countryCode,
-        mobileNumber: strNA(input.contactNo),
-      }),
-    });
+    seeds.push({ tag: 'AS', flag: 2, values: asValues(primaryLocType) });
   }
 
   // ---- RS (related person) — only when a related person is present ----
+  let relatedResolved: ResolvedAddress | undefined;
   if (strNA(input.relatedName) !== '') {
     const gCode = GENDER_CODE[str(input.relatedGender).toLowerCase()] ?? '';
-    const ra = resolveAddress(input.relatedAddress);
-    
+    const ra = resolveAddress(input.relatedAddress, {
+      line1: input.relatedAddressLine1,
+      line2: input.relatedAddressLine2,
+      line3: input.relatedAddressLine3,
+      city: input.relatedCity,
+      district: input.relatedDistrict,
+      state: input.relatedState,
+      pin: input.relatedPin,
+    });
+    relatedResolved = ra;
+    const relatedAddressKey = strNA(input.relatedAddress) !== '' ? 'relatedAddress' : 'relatedAddressLine1';
+    // PIN vs state (e.g. a Telangana 500xxx PIN on an Andhra Pradesh address), misspelt
+    // state, locality in City — all found while resolving.
+    for (const message of ra.notes) {
+      issues.push({ fieldKey: relatedAddressKey, severity: 'warning', rule: 'format', message: `Related Person address: ${message}` });
+    }
+    const rp = phoneParts('Related Person', input.relatedMobile, input.relatedContact, input.relatedStdCode, input.relatedLandline);
+    for (const message of rp.notes) issues.push({ fieldKey: 'rsMobile', severity: 'warning', rule: 'format', message });
+
     // Address parsing check for related person
-    if (input.relatedAddress && !ra.stateCode) {
+    if ((strNA(input.relatedAddress) !== '' || ra.line1 !== '') && !ra.stateCode) {
       issues.push({
-        fieldKey: 'relatedAddress',
+        fieldKey: relatedAddressKey === 'relatedAddress' ? 'relatedAddress' : 'relatedState',
         severity: 'error',
         rule: 'parse',
         blocksBypass: true,
-        message: `Could not determine State Code from Related Person Address "${input.relatedAddress}". Add a recognized state name, CRIF state code, or a valid 6-digit Indian PIN code before generating the file.`,
+        message: `Could not determine State Code from Related Person Address "${ra.line1}". Pick the state from the list (or add a recognized state name / CRIF state code / valid 6-digit PIN) before generating the file.`,
       });
-    }
-
-    // Geographic PIN vs State consistency check
-    if (ra.pinCode && ra.stateCode === '02') {
-      const p = ra.pinCode;
-      if (p.startsWith('500') || p.startsWith('501') || p.startsWith('502') || p.startsWith('503') || p.startsWith('504') || p.startsWith('505') || p.startsWith('506') || p.startsWith('507') || p.startsWith('508') || p.startsWith('509')) {
-        issues.push({
-          fieldKey: 'relatedAddress',
-          severity: 'warning',
-          message: `Related Person Address PIN ${p} is in Telangana (State Code 36), but address text specifies Andhra Pradesh (State Code 02). Update state in address to prevent PIN-State mismatch.`,
-        });
-      }
     }
 
     let rel = mapLegend(RELATIONSHIP_TYPE, input.relationshipType) ?? '';
@@ -989,12 +1217,16 @@ function explode(
         dateOfBirth: ddmmyyyy(input.relatedDob),
         rsPan: strNA(input.relatedPan),
         rsAddressLine1: ra.line1,
+        rsAddressLine2: ra.line2,
+        rsAddressLine3: ra.line3,
         rsCity: ra.city,
-        rsDistrict: ra.city,
+        rsDistrict: ra.district,
         rsStateCode: ra.stateCode,
         rsPinCode: ra.pinCode,
         rsCountry: DEFAULTS.countryCode,
-        rsMobile: strNA(input.relatedContact),
+        rsMobile: rp.mobile,
+        rsTelAreaCode: rp.telAreaCode,
+        rsTelNumber: rp.telNumber,
       }),
     });
   }
@@ -1064,19 +1296,44 @@ function explode(
     const name = strNA(gtor.fullName) || strNA(gtor.entityName);
     if (name === '') continue;
     const gCode = GENDER_CODE[strNA(gtor.gender).toLowerCase()] ?? '';
-    const ga = resolveAddress(gtor.address);
+    const ga = resolveAddress(gtor.address, {
+      line1: gtor.addressLine1,
+      line2: gtor.addressLine2,
+      line3: gtor.addressLine3,
+      city: gtor.city,
+      district: gtor.district,
+      state: gtor.state,
+      pin: gtor.pin,
+    });
     const gtorPan = strNA(gtor.pan);
     const relPan = strNA(input.relatedPan);
+    for (const message of ga.notes) {
+      issues.push({ fieldKey: 'gsAddressLine1', severity: 'warning', rule: 'format', message: `Guarantor ${name} address: ${message}` });
+    }
+    const gp = phoneParts(`Guarantor ${name}`, gtor.mobile, gtor.contact, gtor.stdCode, gtor.landline);
+    for (const message of gp.notes) issues.push({ fieldKey: 'gsMobile', severity: 'warning', rule: 'format', message });
+
+    // The same person typed twice (related person AND guarantor) must carry one address,
+    // or the bureau receives two different addresses for one PAN.
+    if (gtorPan && relPan && gtorPan.toUpperCase() === relPan.toUpperCase() && relatedResolved
+        && !sameText(fullAddress(ga), fullAddress(relatedResolved))) {
+      issues.push({
+        fieldKey: 'gsAddressLine1',
+        severity: 'warning',
+        rule: 'format',
+        message: `PAN ${gtorPan} is both the Related Person and a Guarantor, but the two addresses differ ("${shownAddress(relatedResolved)}" vs "${shownAddress(ga)}"). Use one address for the same person.`,
+      });
+    }
 
     // A guarantor address is parsed from the same Master Sheet row. Do not let a
     // missing state code become a blank wire field that an operator can bypass.
-    if (gtor.address && !ga.stateCode) {
+    if ((strNA(gtor.address) !== '' || ga.line1 !== '') && !ga.stateCode) {
       issues.push({
         fieldKey: 'gsStateCode',
         severity: 'error',
         rule: 'parse',
         blocksBypass: true,
-        message: `Could not determine State Code from Guarantor Address "${gtor.address}". Add a recognized state name, CRIF state code, or a valid 6-digit Indian PIN code before generating the file.`,
+        message: `Could not determine State Code from Guarantor Address "${ga.line1}". Pick the state from the list (or add a recognized state name / CRIF state code / valid 6-digit PIN) before generating the file.`,
       });
     }
 
@@ -1105,12 +1362,16 @@ function explode(
         gsDateOfBirth: ddmmyyyy(gtor.dob),
         gsPan: strNA(gtor.pan),
         gsAddressLine1: ga.line1,
+        gsAddressLine2: ga.line2,
+        gsAddressLine3: ga.line3,
         gsCity: ga.city,
-        gsDistrict: ga.city,
+        gsDistrict: ga.district,
         gsStateCode: ga.stateCode,
         gsPinCode: ga.pinCode,
         gsCountry: DEFAULTS.countryCode,
-        gsMobile: strNA(gtor.contact),
+        gsMobile: gp.mobile,
+        gsTelAreaCode: gp.telAreaCode,
+        gsTelNumber: gp.telNumber,
       }),
     });
   }
@@ -1153,6 +1414,17 @@ interface GuarantorBlock {
   gender: FieldValue;
   address: FieldValue;
   contact: FieldValue;
+  // Split-address template columns (absent in older sheets).
+  addressLine1: FieldValue;
+  addressLine2: FieldValue;
+  addressLine3: FieldValue;
+  city: FieldValue;
+  district: FieldValue;
+  state: FieldValue;
+  pin: FieldValue;
+  mobile: FieldValue;
+  stdCode: FieldValue;
+  landline: FieldValue;
 }
 
 /**
@@ -1174,6 +1446,9 @@ function readGuarantorBlocks(rawCells: FlatExplodeContext['rawCells']): Guaranto
     const blk: GuarantorBlock = {
       type: undefined, entityName: undefined, fullName: undefined, dob: undefined,
       pan: undefined, gender: undefined, address: undefined, contact: undefined,
+      addressLine1: undefined, addressLine2: undefined, addressLine3: undefined, city: undefined,
+      district: undefined, state: undefined, pin: undefined, mobile: undefined,
+      stdCode: undefined, landline: undefined,
     };
     for (const c of rawCells) {
       if (c.col < from || c.col >= to) continue;
@@ -1185,7 +1460,20 @@ function readGuarantorBlocks(rawCells: FlatExplodeContext['rawCells']): Guaranto
       else if (h.includes('pan')) blk.pan = c.value;
       // Gender header varies ("Gender" or "Male 01 Female 02 … Gender") — match anywhere.
       else if (h.includes('gender')) blk.gender = c.value;
+      // Split-address template sub-headers. The specific lines come before the generic
+      // "address" match, and PIN/City/State after it: the older single column reads
+      // "…Address Full address with pin code" and must stay the free-text address.
+      else if (h.includes('address line 1')) blk.addressLine1 = c.value;
+      else if (h.includes('address line 2')) blk.addressLine2 = c.value;
+      else if (h.includes('address line 3')) blk.addressLine3 = c.value;
       else if (h.includes('address')) blk.address = c.value;
+      else if (h.includes('city')) blk.city = c.value;
+      else if (h.includes('district')) blk.district = c.value;
+      else if (h.includes('state')) blk.state = c.value;
+      else if (h.includes('pin')) blk.pin = c.value;
+      else if (h.includes('mobile')) blk.mobile = c.value;
+      else if (h.includes('std code')) blk.stdCode = c.value;
+      else if (h.includes('landline')) blk.landline = c.value;
       else if (h.includes('contact')) blk.contact = c.value;
     }
     blocks.push(blk);
@@ -1222,8 +1510,15 @@ function wilfulCode(v: FieldValue): string {
   return s;
 }
 
-/** Build a TypedRow from a sparse object (undefined keys stay blank). */
+/**
+ * Build a TypedRow from a sparse object (undefined keys stay blank). A line break typed
+ * inside a cell (Alt+Enter) would split the record across physical lines on the wire,
+ * so text values have line breaks and tabs folded to one space.
+ */
 function row(values: Record<string, FieldValue>): TypedRow {
+  for (const [k, v] of Object.entries(values)) {
+    if (typeof v === 'string' && /[\r\n\t]/.test(v)) values[k] = v.replace(/[ \t]*[\r\n\t]+[ \t]*/g, ' ');
+  }
   return values as TypedRow;
 }
 

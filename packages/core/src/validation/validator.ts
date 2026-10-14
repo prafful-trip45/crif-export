@@ -60,6 +60,21 @@ export function validate(format: FormatSpec, borrowers: Borrower[]): ValidationR
     }
   }
 
+  for (const f of format.checkFile?.(borrowers) ?? []) {
+    report.add({
+      severity: 'error',
+      sheet: f.sheet,
+      acNo: f.acNo,
+      rowNumber: f.rowNumber,
+      column: f.column,
+      fieldKey: f.fieldKey,
+      rule: 'duplicate',
+      message: f.message,
+      reference: referenceFor(format, specByTag.get('CR'), undefined, 'duplicate', f.message),
+      value: f.value,
+    });
+  }
+
   return report;
 }
 
@@ -95,6 +110,14 @@ function validateRow(report: ValidationReport, format: FormatSpec, spec: Segment
       continue;
     }
     if (!present) continue;
+
+    // The pipe is the field separator: one inside a value shifts every later field.
+    if (spec.encoding === 'pipe-delimited' && raw.includes('|')) {
+      report.add({
+        ...issue(format, spec, row, field, 'format', 'error', `Value "${raw}" contains "|", the field separator, which would shift every later field. Remove it from the cell.`, value),
+        bypassable: false,
+      });
+    }
 
     // enum membership
     if (field.enum && !(raw in field.enum)) {

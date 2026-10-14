@@ -142,6 +142,16 @@ export interface FormatSpec {
    * reports them as errors against the borrower. Runs once per borrower.
    */
   checkBorrower?: (segments: ReadonlyArray<{ tag: string; values: Record<string, unknown> }>) => string[];
+  /**
+   * Whole-file checks across borrowers (e.g. an account number reported twice). Runs
+   * once after the per-borrower walk; each finding is reported as an error.
+   */
+  checkFile?: (
+    borrowers: ReadonlyArray<{
+      acNo: string;
+      segments: ReadonlyArray<{ tag: string; sheet: string; rowNumber: number; values: Record<string, unknown>; sourceColumns?: Record<string, string> }>;
+    }>,
+  ) => Array<{ message: string; acNo: string; sheet: string; rowNumber: number; fieldKey: string; column?: string; value?: unknown }>;
   /** Omit the trailer record entirely (flat Consumer output has none). */
   omitTrailer?: boolean;
   /**
@@ -206,8 +216,10 @@ export interface FormatSpec {
      * entry: e.g. `rsStateCode`/`rsPinCode`/`rsCity` are all parsed out of the
      * `relatedAddress` column, so a blank state points the user at the address cell.
      * The reader uses this + the resolved column map to stamp `SegmentRow.sourceColumns`.
+     * A list names alternative inputs in priority order (the first one present wins),
+     * for sheets that carry either a split column or the older free-text one.
      */
-    wireFieldSource?: Record<string, string>;
+    wireFieldSource?: Record<string, string | string[]>;
     /**
      * File-level header values the accountant fills in the sheet's top rows, by
      * cell address -> FileMeta key (e.g. { B5: 'memberId', B6: 'reportingDate',
@@ -228,7 +240,7 @@ export interface SegmentSeed {
     fieldKey: string;
     message: string;
     severity?: Severity;
-    rule?: 'lookup' | 'parse';
+    rule?: 'lookup' | 'parse' | 'format';
     /** Bureau specification section, catalogue, or source layout behind this finding. */
     reference?: string;
     /** Prevent output even if the operator requests validation bypass. */

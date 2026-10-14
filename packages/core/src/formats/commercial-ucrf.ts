@@ -418,6 +418,41 @@ export const checkCommercialBorrower = (
   segments: ReadonlyArray<{ tag: string; values: Record<string, unknown> }>,
 ): string[] => [...checkRegisteredOffice(segments), ...checkWilfulDefaultDate(segments)];
 
+/**
+ * A credit facility is identified by its account number, so the same number twice in
+ * one submission is either a typo on a second loan or the same loan entered twice —
+ * either way the bureau cannot keep both records apart.
+ */
+export const checkCommercialFile: NonNullable<FormatSpec['checkFile']> = (borrowers) => {
+  const findings: ReturnType<NonNullable<FormatSpec['checkFile']>> = [];
+  const firstSeen = new Map<string, number>();
+  for (const borrower of borrowers) {
+    for (const seg of borrower.segments) {
+      if (seg.tag !== 'CR') continue;
+      const account = String(seg.values.accountNumber ?? '').trim();
+      if (account === '') continue;
+      const firstRow = firstSeen.get(account);
+      if (firstRow === undefined) {
+        firstSeen.set(account, seg.rowNumber);
+        continue;
+      }
+      findings.push({
+        message:
+          `Account number ${account} is reported more than once (rows ${firstRow} and ${seg.rowNumber}). ` +
+          'Each credit facility needs its own account number: correct it if these are different loans, ' +
+          'or delete the repeated row if it is the same loan.',
+        acNo: borrower.acNo,
+        sheet: seg.sheet,
+        rowNumber: seg.rowNumber,
+        fieldKey: 'accountNumber',
+        column: seg.sourceColumns?.accountNumber,
+        value: account,
+      });
+    }
+  }
+  return findings;
+};
+
 export const commercialUcrf: FormatSpec = {
   id: 'commercial-ucrf',
   label: 'Commercial UCRF (Template)',
@@ -430,6 +465,7 @@ export const commercialUcrf: FormatSpec = {
   body: [BS, AS, RS, CR, GS, SS, CD],
   trailer: TS,
   checkBorrower: checkCommercialBorrower,
+  checkFile: checkCommercialFile,
   buildHeaderRow: (meta): TypedRow => ({
     _tag: 'HD',
     memberId: meta.memberId,
